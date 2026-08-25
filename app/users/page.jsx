@@ -26,7 +26,7 @@ export default async function UsersPage() {
   const { data: classroomsRaw } = await supabase
     .from("classrooms")
     .select("id, section, class_teacher_id, academic_levels(name, sort_order)");
-    const classrooms = (classroomsRaw || []).sort(
+  const classrooms = (classroomsRaw || []).sort(
     (a, b) =>
       a.academic_levels.sort_order - b.academic_levels.sort_order ||
       a.section.localeCompare(b.section)
@@ -112,9 +112,11 @@ export default async function UsersPage() {
                     className="rounded-lg border border-stone-300 px-2 py-1.5 text-xs"
                   >
                     <option value="">No homeroom teacher</option>
-                    {teachers.map((t) => (
-                      <option key={t.id} value={t.id}>{t.full_name}</option>
-                    ))}
+                    {teachers
+                      .filter((t) => t.id === c.class_teacher_id || !homeroomTeacherIds.has(t.id))
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>{t.full_name}</option>
+                      ))}
                   </select>
                   <button
                     type="submit"
