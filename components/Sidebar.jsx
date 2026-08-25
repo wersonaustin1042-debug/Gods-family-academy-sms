@@ -12,6 +12,7 @@ const ALL_NAV = [
   { href: "/report-card", label: "Report card", roles: [...ADMIN_LIKE, "teacher"] },
   { href: "/fees", label: "Fees", roles: [...ADMIN_LIKE, "accountant", "teacher"] },
   { href: "/fees-overview", label: "Fees overview", roles: ["admin", "director"] },
+  { href: "/promotion", label: "End-of-year promotion", roles: ["admin", "director"] },
   { href: "/revenue-reports", label: "Revenue reports", roles: ["admin", "director", "accountant"] },
   { href: "/fees-owing", label: "Fee-owing students", roles: ["admin", "director", "teacher"] },
   { href: "/absentees", label: "Absentee list", roles: ["admin", "director", "teacher"] },
