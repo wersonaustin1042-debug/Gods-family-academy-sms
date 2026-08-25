@@ -33,26 +33,71 @@ function getRange(period, dateStr) {
   return { start: selected, end: selected, label: formatDate(selected) };
 }
 
+// Turns the flat rows from get_revenue_by_class() into one row per classroom
+// with a column per fee type, plus a row total. Fee-type column order is
+// fixed (Tuition, Canteen, Transport) so the table doesn't reshuffle.
+function pivotByClass(rows) {
+  const FEE_TYPE_ORDER = ["Tuition", "Canteen", "Transport"];
+
+  const classrooms = new Map(); // classroom_id -> { label, totals: { feeType: number } }
+
+  for (const r of rows) {
+    if (!classrooms.has(r.classroom_id)) {
+      classrooms.set(r.classroom_id, { label: r.classroom_label, totals: {} });
+    }
+    classrooms.get(r.classroom_id).totals[r.fee_type] = Number(r.total);
+  }
+
+  const feeTypesPresent = FEE_TYPE_ORDER.filter((ft) =>
+    rows.some((r) => r.fee_type === ft)
+  );
+  // include any unexpected fee types too, appended after the known ones
+  for (const r of rows) {
+    if (!feeTypesPresent.includes(r.fee_type)) feeTypesPresent.push(r.fee_type);
+  }
+
+  const classroomRows = Array.from(classrooms.values())
+    .map((c) => {
+      const rowTotal = feeTypesPresent.reduce((sum, ft) => sum + (c.totals[ft] || 0), 0);
+      return { ...c, rowTotal };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  const columnTotals = feeTypesPresent.reduce((acc, ft) => {
+    acc[ft] = classroomRows.reduce((sum, c) => sum + (c.totals[ft] || 0), 0);
+    return acc;
+  }, {});
+  const grandTotal = classroomRows.reduce((sum, c) => sum + c.rowTotal, 0);
+
+  return { feeTypes: feeTypesPresent, classroomRows, columnTotals, grandTotal };
+}
+
 export default async function RevenueReportsPage({ searchParams }) {
   const supabase = createClient();
 
   const period = ["day", "week", "month"].includes(searchParams?.period) ? searchParams.period : "day";
   const dateParam = searchParams?.date || formatDate(new Date());
+  const view = searchParams?.view === "class" ? "class" : "type";
 
   const { start, end, label } = getRange(period, dateParam);
+  const rangeParams = { start_date: formatDate(start), end_date: formatDate(end) };
 
-  const { data: rows } = await supabase.rpc("get_revenue_report", {
-    start_date: formatDate(start),
-    end_date: formatDate(end),
-  });
-
-  const breakdown = rows || [];
+  const { data: typeRows } = await supabase.rpc("get_revenue_report", rangeParams);
+  const breakdown = typeRows || [];
   const combinedTotal = breakdown.reduce((sum, r) => sum + Number(r.total), 0);
+
+  const { data: classRows } = await supabase.rpc("get_revenue_by_class", rangeParams);
+  const byClass = pivotByClass(classRows || []);
 
   const tabs = [
     { key: "day", label: "Day" },
     { key: "week", label: "Week" },
     { key: "month", label: "Month" },
+  ];
+
+  const viewTabs = [
+    { key: "type", label: "By fee type" },
+    { key: "class", label: "By class" },
   ];
 
   return (
@@ -68,7 +113,7 @@ export default async function RevenueReportsPage({ searchParams }) {
           {tabs.map((t) => (
             <a
               key={t.key}
-              href={`/revenue-reports?period=${t.key}&date=${dateParam}`}
+              href={`/revenue-reports?period=${t.key}&date=${dateParam}&view=${view}`}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
                 period === t.key
                   ? "bg-ink text-white border-ink"
@@ -82,6 +127,7 @@ export default async function RevenueReportsPage({ searchParams }) {
 
         <form method="get" className="flex items-end gap-2 mb-6">
           <input type="hidden" name="period" value={period} />
+          <input type="hidden" name="view" value={view} />
           <div>
             <label className="block text-xs text-stone-400 mb-1">
               {period === "day"
@@ -112,34 +158,106 @@ export default async function RevenueReportsPage({ searchParams }) {
           <p className="font-display text-2xl font-semibold text-clay">Gh₵ {combinedTotal.toFixed(2)}</p>
         </div>
 
-        <p className="text-sm font-medium text-ink mb-2">By fee type</p>
-        <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-stone-50 text-stone-500 text-xs uppercase">
-              <tr>
-                <th className="text-left px-4 py-2 font-medium">Fee type</th>
-                <th className="text-right px-4 py-2 font-medium">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {breakdown.map((r) => (
-                <tr key={r.fee_type} className="border-t border-stone-100">
-                  <td className="px-4 py-2 text-ink">{r.fee_type}</td>
-                  <td className="px-4 py-2 text-right font-medium text-clay">
-                    Gh₵ {Number(r.total).toFixed(2)}
-                  </td>
-                </tr>
-              ))}
-              {breakdown.length === 0 && (
-                <tr>
-                  <td colSpan={2} className="px-4 py-6 text-center text-stone-400">
-                    No revenue recorded for this period.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="flex gap-2 mb-3">
+          {viewTabs.map((t) => (
+            <a
+              key={t.key}
+              href={`/revenue-reports?period=${period}&date=${dateParam}&view=${t.key}`}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+                view === t.key
+                  ? "bg-ink text-white border-ink"
+                  : "bg-white text-stone-500 border-stone-200"
+              }`}
+            >
+              {t.label}
+            </a>
+          ))}
         </div>
+
+        {view === "type" && (
+          <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-stone-50 text-stone-500 text-xs uppercase">
+                <tr>
+                  <th className="text-left px-4 py-2 font-medium">Fee type</th>
+                  <th className="text-right px-4 py-2 font-medium">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakdown.map((r) => (
+                  <tr key={r.fee_type} className="border-t border-stone-100">
+                    <td className="px-4 py-2 text-ink">{r.fee_type}</td>
+                    <td className="px-4 py-2 text-right font-medium text-clay">
+                      Gh₵ {Number(r.total).toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+                {breakdown.length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="px-4 py-6 text-center text-stone-400">
+                      No revenue recorded for this period.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {view === "class" && (
+          <div className="bg-white rounded-xl border border-stone-200 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-stone-50 text-stone-500 text-xs uppercase">
+                <tr>
+                  <th className="text-left px-4 py-2 font-medium whitespace-nowrap">Class</th>
+                  {byClass.feeTypes.map((ft) => (
+                    <th key={ft} className="text-right px-4 py-2 font-medium whitespace-nowrap">
+                      {ft}
+                    </th>
+                  ))}
+                  <th className="text-right px-4 py-2 font-medium whitespace-nowrap">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byClass.classroomRows.map((c) => (
+                  <tr key={c.label} className="border-t border-stone-100">
+                    <td className="px-4 py-2 text-ink whitespace-nowrap">{c.label}</td>
+                    {byClass.feeTypes.map((ft) => (
+                      <td key={ft} className="px-4 py-2 text-right text-stone-600">
+                        Gh₵ {(c.totals[ft] || 0).toFixed(2)}
+                      </td>
+                    ))}
+                    <td className="px-4 py-2 text-right font-medium text-clay">
+                      Gh₵ {c.rowTotal.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+                {byClass.classroomRows.length === 0 && (
+                  <tr>
+                    <td colSpan={byClass.feeTypes.length + 2} className="px-4 py-6 text-center text-stone-400">
+                      No revenue recorded for this period.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              {byClass.classroomRows.length > 0 && (
+                <tfoot>
+                  <tr className="border-t border-stone-200 bg-stone-50">
+                    <td className="px-4 py-2 font-medium text-ink whitespace-nowrap">All classes</td>
+                    {byClass.feeTypes.map((ft) => (
+                      <td key={ft} className="px-4 py-2 text-right font-medium text-ink">
+                        Gh₵ {(byClass.columnTotals[ft] || 0).toFixed(2)}
+                      </td>
+                    ))}
+                    <td className="px-4 py-2 text-right font-semibold text-clay">
+                      Gh₵ {byClass.grandTotal.toFixed(2)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        )}
       </main>
     </div>
   );
