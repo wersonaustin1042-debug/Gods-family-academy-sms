@@ -1,5 +1,4 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import PromotionForm from "./PromotionForm";
 
@@ -8,23 +7,11 @@ export const dynamic = "force-dynamic";
 export default async function PromotionPage() {
   const supabase = createClient();
 
-  // --- Role guard ---------------------------------------------------
-  // ASSUMPTION: profiles table has a `role` column ('admin' | 'director' | ...),
-  // matching the pattern used elsewhere in the app (e.g. /fees-overview).
-  // If your actual guard looks different, swap this block to match it.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user?.id)
-    .single();
-
-  if (!profile || !["admin", "director"].includes(profile.role)) {
-    redirect("/dashboard");
-  }
+  // No page-level role check here — matching the pattern used on
+  // /fees-overview. Access is controlled by (1) only showing this page's
+  // sidebar link to admin/director roles, and (2) promote_students()
+  // itself calling is_admin_like() and rejecting anyone else at the DB
+  // level, so even a direct URL visit can't actually run a promotion.
 
   // --- Data --------------------------------------------------------
   const { data: classrooms } = await supabase
