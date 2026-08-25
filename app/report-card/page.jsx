@@ -386,7 +386,7 @@ export default async function ReportCardPage({ searchParams }) {
                 />
               )}
               <img src="/logo.png" alt="" className="h-16 w-16 mx-auto mb-1 object-contain" />
-              <p className="font-display text-base font-bold text-ink leading-tight">BARIMA DUAH MEMORIAL SCHOOL</p>
+              <p className="font-display text-base font-bold text-ink leading-tight">God's Family Academy</p>
               <p className="text-[10px] text-stone-500 leading-tight">(Founded and Supported by ABAK FOUNDATION GHANA - NGO)</p>
               <p className="text-[10px] text-stone-500 leading-tight">Location: Kumasi Sokoban Timpomu — Contact: 0246-731605</p>
               <p className="text-sm font-semibold text-ink mt-1.5 uppercase tracking-wide">Pupil's Report Card</p>

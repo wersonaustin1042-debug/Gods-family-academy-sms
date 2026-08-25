@@ -50,11 +50,11 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <img
             src="/logo.png"
-            alt="Barima Duah Memorial School"
+            alt="God's Family Academy"
             className="h-16 w-16 mx-auto mb-3 object-contain"
             onError={(e) => (e.currentTarget.style.display = "none")}
           />
-          <h1 className="font-display text-2xl font-semibold text-pine">Barima Duah Memorial School</h1>
+          <h1 className="font-display text-2xl font-semibold text-pine">God's Family Academy</h1>
           <p className="text-sm text-stone-500 mt-1">Management System</p>
         </div>
 
