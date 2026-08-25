@@ -55,12 +55,12 @@ export default function Sidebar() {
         <div className="mb-8 px-2 flex items-center gap-2">
           <img
             src="/logo.png"
-            alt="Barima Duah Memorial School"
+            alt="God's Family Academy"
             className="h-9 w-9 object-contain shrink-0"
             onError={(e) => (e.currentTarget.style.display = "none")}
           />
           <div>
-            <p className="font-display text-lg font-semibold text-pine leading-tight">Barima Duah</p>
+            <p className="font-display text-lg font-semibold text-pine leading-tight">God's Family Academy</p>
             <p className="text-[11px] text-stone-400 mt-0.5">Creche — JHS 3</p>
           </div>
         </div>
@@ -87,11 +87,11 @@ export default function Sidebar() {
         <div className="flex items-center gap-2">
           <img
             src="/logo.png"
-            alt="Barima Duah Memorial School"
+            alt="God's Family Academy"
             className="h-7 w-7 object-contain shrink-0"
             onError={(e) => (e.currentTarget.style.display = "none")}
           />
-          <p className="font-display text-base font-semibold text-pine leading-tight">Barima Duah</p>
+          <p className="font-display text-base font-semibold text-pine leading-tight">God's Family Academy</p>
         </div>
         <button
           onClick={() => setMenuOpen((v) => !v)}

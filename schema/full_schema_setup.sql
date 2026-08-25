@@ -1,6 +1,6 @@
 -- ============================================================
 -- School SMS — full database setup script
--- Generated from the live Barima Duah Memorial School project,
+-- Generated from the live God's Family Academy project,
 -- for reuse as the starting point on every future school.
 --
 -- Run this ONCE in a brand-new Supabase project's SQL Editor,

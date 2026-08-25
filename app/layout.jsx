@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Barima Duah Memorial School — Management System",
-  description: "Enrollment, attendance, and fees for Barima Duah Memorial School",
+  title: "God's Family Academy — Management System",
+  description: "Enrollment, attendance, and fees for God's Family Academy",
 };
 
 export default function RootLayout({ children }) {
