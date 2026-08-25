@@ -70,7 +70,7 @@ export default function LoginPage() {
               className="w-full mt-1 rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pine/40"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@barimadua.edu.gh"
+              placeholder="you@godsfamily.edu.gh"
             />
           </div>
           <div>
