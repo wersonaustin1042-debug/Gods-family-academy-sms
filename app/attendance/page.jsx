@@ -50,7 +50,12 @@ export default async function AttendancePage({ searchParams }) {
       a.academic_levels.sort_order - b.academic_levels.sort_order ||
       a.section.localeCompare(b.section)
   );
-if (myProfile?.role === "teacher") { const { data: assignedRows } = await supabase .from("teacher_classrooms") .select("classroom_id") .eq("teacher_id", user.id); const assignedIds = new Set((assignedRows || []).map((r) => r.classroom_id)); classrooms = classrooms.filter((c) => assignedIds.has(c.id)); }
+
+  // Teachers can only take attendance for their own homeroom class, not every class they teach.
+  if (myProfile?.role === "teacher") {
+    classrooms = classrooms.filter((c) => c.class_teacher_id === user.id);
+  }
+
   const days = weekdaysInMonth(selectedYear, selectedMonth);
 
   let students = [];
