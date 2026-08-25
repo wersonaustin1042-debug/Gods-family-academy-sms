@@ -74,13 +74,10 @@ export default async function ReportCardPage({ searchParams }) {
       a.academic_levels.sort_order - b.academic_levels.sort_order ||
       a.section.localeCompare(b.section)
   );
+
+  // Teachers can only generate report cards for their own homeroom class, not every class they teach.
   if (myProfile?.role === "teacher") {
-    const { data: assigned } = await supabase
-      .from("teacher_classrooms")
-      .select("classroom_id")
-      .eq("teacher_id", user.id);
-    const ids = new Set((assigned || []).map((a) => a.classroom_id));
-    classrooms = classrooms.filter((c) => ids.has(c.id));
+    classrooms = classrooms.filter((c) => c.class_teacher_id === user.id);
   }
 
   const { data: termInfo } = await supabase.from("term_info").select("*").eq("term", selectedTerm).single();
