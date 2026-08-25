@@ -26,11 +26,12 @@ export default async function UsersPage() {
   const { data: classroomsRaw } = await supabase
     .from("classrooms")
     .select("id, section, class_teacher_id, academic_levels(name, sort_order)");
-  const classrooms = (classroomsRaw || []).sort(
+    const classrooms = (classroomsRaw || []).sort(
     (a, b) =>
       a.academic_levels.sort_order - b.academic_levels.sort_order ||
       a.section.localeCompare(b.section)
   );
+  const homeroomTeacherIds = new Set(classrooms.map((c) => c.class_teacher_id).filter(Boolean));
 
   const { data: students } = await supabase
     .from("students")
