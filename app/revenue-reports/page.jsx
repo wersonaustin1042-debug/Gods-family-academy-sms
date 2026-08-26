@@ -35,9 +35,10 @@ function getRange(period, dateStr) {
 
 // Turns the flat rows from get_revenue_by_class() into one row per classroom
 // with a column per fee type, plus a row total. Fee-type column order is
-// fixed (Tuition, Canteen, Transport) so the table doesn't reshuffle.
+// fixed (Tuition, Canteen_Transport — matching the initcap() label the SQL
+// functions produce) so the table doesn't reshuffle.
 function pivotByClass(rows) {
-  const FEE_TYPE_ORDER = ["Tuition", "Canteen", "Transport"];
+  const FEE_TYPE_ORDER = ["Tuition", "Canteen_Transport"];
 
   const classrooms = new Map(); // classroom_id -> { label, totals: { feeType: number } }
 
@@ -106,7 +107,7 @@ export default async function RevenueReportsPage({ searchParams }) {
       <main className="flex-1 p-5 sm:p-8 max-w-3xl">
         <h1 className="font-display text-2xl font-semibold text-ink mb-1">Revenue reports</h1>
         <p className="text-stone-500 text-sm mb-6">
-          Fees collected across Tuition, Canteen, and Transport.
+          Fees collected across Tuition and Canteen & Transport.
         </p>
 
         <div className="flex gap-2 mb-4">
