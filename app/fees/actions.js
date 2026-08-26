@@ -1,7 +1,8 @@
 "use server";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-// Makes sure a student has a tuition plan and canteen/transport fee rows.
+
+// Makes sure a student has a tuition plan and a canteen+transport fee row.
 export async function ensureFeeSetup(studentId) {
   const supabase = createClient();
   const { data: plan } = await supabase
@@ -17,17 +18,16 @@ export async function ensureFeeSetup(studentId) {
     .select("fee_type")
     .eq("student_id", studentId);
   const have = new Set((existingFees || []).map((f) => f.fee_type));
-  const toInsert = [];
-  if (!have.has("canteen")) {
-    toInsert.push({ student_id: studentId, fee_type: "canteen", frequency: "daily", amount: 5 });
-  }
-  if (!have.has("transport")) {
-    toInsert.push({ student_id: studentId, fee_type: "transport", frequency: "monthly", amount: 60 });
-  }
-  if (toInsert.length > 0) {
-    await supabase.from("recurring_fees").insert(toInsert);
+  if (!have.has("canteen_transport")) {
+    await supabase.from("recurring_fees").insert({
+      student_id: studentId,
+      fee_type: "canteen_transport",
+      frequency: "daily",
+      amount: 10, // default — edit per school from the fees page
+    });
   }
 }
+
 export async function changeFrequency(formData) {
   const supabase = createClient();
   const feeId = formData.get("feeId");
@@ -35,6 +35,18 @@ export async function changeFrequency(formData) {
   await supabase.from("recurring_fees").update({ frequency }).eq("id", feeId);
   revalidatePath("/fees");
 }
+
+// Lets you edit the typical amount for a recurring fee — same
+// daily/weekly/monthly format as before, just one merged line now.
+export async function changeAmount(formData) {
+  const supabase = createClient();
+  const feeId = formData.get("feeId");
+  const amount = Number(formData.get("amount"));
+  if (Number.isNaN(amount) || amount < 0) return;
+  await supabase.from("recurring_fees").update({ amount }).eq("id", feeId);
+  revalidatePath("/fees");
+}
+
 // Saves a whole month's worth of canteen/transport amounts at once.
 // Only touches rows that are actually new or actually changed, so
 // recorded_by on untouched entries is never overwritten.
@@ -83,6 +95,7 @@ export async function saveRecurringMonth(formData) {
   }
   revalidatePath("/fees");
 }
+
 // Saves a whole month's worth of tuition payments (one entry per day) at once.
 // Only touches rows that are actually new or actually changed, so
 // recorded_by on untouched entries is never overwritten.
