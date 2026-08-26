@@ -63,7 +63,7 @@ export default async function FeesOwingPage() {
     students = data || [];
   }
 
-  // Make sure every student has tuition + canteen + transport rows set up.
+  // Make sure every student has tuition + canteen & transport rows set up.
   for (const s of students) {
     await ensureFeeSetup(s.id);
   }
@@ -130,7 +130,7 @@ export default async function FeesOwingPage() {
           Fee-owing students
         </p>
         <p className="text-stone-500 text-sm mb-6">
-          Tuition balances, plus Canteen/Transport unpaid for the current period. As of {today}.
+          Tuition balances, plus Canteen & transport unpaid for the current period. As of {today}.
         </p>
 
         <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
