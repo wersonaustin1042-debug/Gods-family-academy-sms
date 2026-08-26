@@ -92,8 +92,7 @@ export default async function ParentPage({ searchParams }) {
       .select("id, fee_type, frequency")
       .eq("student_id", child.id);
 
-    let canteenPaid = null;
-    let transportPaid = null;
+    let canteenTransportPaid = null;
     for (const fee of fees || []) {
       const periodKey = getPeriodKey(fee.frequency);
       const { data: payment } = await supabase
@@ -102,8 +101,7 @@ export default async function ParentPage({ searchParams }) {
         .eq("recurring_fee_id", fee.id)
         .eq("period_key", periodKey)
         .maybeSingle();
-      if (fee.fee_type === "canteen") canteenPaid = !!payment;
-      if (fee.fee_type === "transport") transportPaid = !!payment;
+      if (fee.fee_type === "canteen_transport") canteenTransportPaid = !!payment;
     }
 
     // ---- Grades for the selected term ----
@@ -175,8 +173,7 @@ export default async function ParentPage({ searchParams }) {
       presentDays,
       totalDays,
       tuitionBalance: plan ? Number(plan.total_amount) - Number(plan.amount_paid) : null,
-      canteenPaid,
-      transportPaid,
+      canteenTransportPaid,
       subjectRows,
       overallTotal,
       overallPosition,
@@ -228,15 +225,9 @@ export default async function ParentPage({ searchParams }) {
                   </p>
                 </div>
                 <div className="bg-stone-50 rounded-lg p-3">
-                  <p className="text-xs text-stone-400">Canteen</p>
+                  <p className="text-xs text-stone-400">Canteen & transport</p>
                   <p className="text-sm font-medium text-ink">
-                    {child.canteenPaid === null ? "—" : child.canteenPaid ? "Paid" : "Due"}
-                  </p>
-                </div>
-                <div className="bg-stone-50 rounded-lg p-3">
-                  <p className="text-xs text-stone-400">Transport</p>
-                  <p className="text-sm font-medium text-ink">
-                    {child.transportPaid === null ? "—" : child.transportPaid ? "Paid" : "Due"}
+                    {child.canteenTransportPaid === null ? "—" : child.canteenTransportPaid ? "Paid" : "Due"}
                   </p>
                 </div>
               </div>
