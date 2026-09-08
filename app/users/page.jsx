@@ -87,12 +87,12 @@ export default async function UsersPage() {
           </form>
         </details>
 
-        {/* Homeroom / class teacher assignment — one teacher per classroom, used to scope Fees access */}
+        {/* Homeroom / class teacher assignment — one teacher per classroom, used to scope Attendance and Report Cards */}
         <details className="mb-6" open>
           <summary className="text-sm font-medium text-ink cursor-pointer">Homeroom teacher</summary>
           <p className="text-xs text-stone-400 mt-1 mb-3">
             Set which teacher is the homeroom (class) teacher for each classroom. This is separate from the
-            class assignments below — homeroom teachers get access to Fees for their own class.
+            class assignments below — homeroom teachers get access to Attendance and Report Cards for their own class. Fees are managed by admin/accountant only.
           </p>
           <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
             {classrooms.map((c) => (
