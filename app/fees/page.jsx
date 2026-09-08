@@ -102,9 +102,11 @@ export default async function FeesPage({ searchParams }) {
       a.section.localeCompare(b.section)
   );
 
-  // Teachers only manage fees for their own homeroom class, not every class they teach.
-  if (myProfile?.role === "teacher") {
-    classrooms = classrooms.filter((c) => c.class_teacher_id === user.id);
+  // GFA policy: teachers have no fee/money access at all (unlike other
+  // schools where homeroom teachers can record fees for their own class).
+  const isTeacher = myProfile?.role === "teacher";
+  if (isTeacher) {
+    classrooms = [];
   }
 
   let classStudents = [];
@@ -213,8 +215,8 @@ export default async function FeesPage({ searchParams }) {
               {c.academic_levels.name} {c.section}
             </Link>
           ))}
-          {myProfile?.role === "teacher" && classrooms.length === 0 && (
-            <p className="text-xs text-stone-400">You aren't set as the homeroom teacher for any class yet.</p>
+          {isTeacher && (
+            <p className="text-xs text-stone-400">Fees are managed by the school's accountant and admin team.</p>
           )}
         </div>
 
