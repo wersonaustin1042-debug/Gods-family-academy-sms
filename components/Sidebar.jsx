@@ -62,7 +62,7 @@ export default function Sidebar() {
           />
           <div>
             <p className="font-display text-lg font-semibold text-pine leading-tight">God's Family Academy</p>
-            <p className="text-[11px] text-stone-400 mt-0.5">Creche — JHS 3</p>
+            <p className="text-[11px] text-stone-400 mt-0.5 italic">Service to God and Humanity</p>
           </div>
         </div>
         <nav className="space-y-1 flex-1">

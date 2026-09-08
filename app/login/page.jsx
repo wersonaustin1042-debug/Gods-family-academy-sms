@@ -55,6 +55,7 @@ export default function LoginPage() {
             onError={(e) => (e.currentTarget.style.display = "none")}
           />
           <h1 className="font-display text-2xl font-semibold text-pine">God's Family Academy</h1>
+          <p className="text-xs text-stone-400 italic mt-0.5">Service to God and Humanity</p>
           <p className="text-sm text-stone-500 mt-1">Management System</p>
         </div>
 
