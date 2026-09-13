@@ -113,11 +113,12 @@ export default async function ParentPage({ searchParams }) {
     if (child.classroom_id) {
       const { data: exams } = await supabase
         .from("exams")
-        .select("id, subject_name, exam_type")
+        .select("id, subject_id, exam_type, subjects(name)")
         .eq("classroom_id", child.classroom_id)
         .eq("term", selectedTerm);
       const examIds = (exams || []).map((e) => e.id);
-      const subjects = [...new Set((exams || []).map((e) => e.subject_name))];
+      const subjectIds = [...new Set((exams || []).map((e) => e.subject_id))];
+      const subjectNameById = new Map((exams || []).map((e) => [e.subject_id, e.subjects?.name || "Unknown"]));
 
       if (examIds.length > 0) {
         const { data: classmates } = await supabase
@@ -128,28 +129,28 @@ export default async function ParentPage({ searchParams }) {
 
         const { data: allResults } = await supabase
           .from("results")
-          .select("student_id, score, exams(subject_name, exam_type)")
+          .select("student_id, score, exams(subject_id, exam_type)")
           .in("exam_id", examIds);
 
         const studentTotals = {};
         (allResults || []).forEach((r) => {
           const sid = r.student_id;
-          const subj = r.exams.subject_name;
+          const subj = r.exams.subject_id;
           if (!studentTotals[sid]) studentTotals[sid] = {};
           if (!studentTotals[sid][subj]) studentTotals[sid][subj] = {};
           studentTotals[sid][subj][r.exams.exam_type] = { score: r.score };
         });
 
-        subjectRows = subjects.map((subject) => {
+        subjectRows = subjectIds.map((subjectId) => {
           const entries = (classmates || []).map((c) => ({
             id: c.id,
-            value: subjectTotal(studentTotals[c.id]?.[subject]),
+            value: subjectTotal(studentTotals[c.id]?.[subjectId]),
           }));
           const { map, outOf: subjectOutOf } = rankMap(entries);
-          const t = studentTotals[child.id]?.[subject];
+          const t = studentTotals[child.id]?.[subjectId];
           const total = subjectTotal(t);
           return {
-            subject,
+            subject: subjectNameById.get(subjectId) || "Unknown",
             total,
             grade: total > 0 ? remarkFor(total) : "—",
             position: map.get(child.id) ? ordinal(map.get(child.id)) : "—",
@@ -158,7 +159,7 @@ export default async function ParentPage({ searchParams }) {
         });
 
         const overallEntries = (classmates || []).map((c) => {
-          const value = subjects.reduce((sum, subj) => sum + subjectTotal(studentTotals[c.id]?.[subj]), 0);
+          const value = subjectIds.reduce((sum, subjId) => sum + subjectTotal(studentTotals[c.id]?.[subjId]), 0);
           return { id: c.id, value };
         });
         const { map: overallMap, outOf: classOutOf } = rankMap(overallEntries);
