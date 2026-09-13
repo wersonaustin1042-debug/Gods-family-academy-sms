@@ -24,7 +24,13 @@ export async function addSubject(formData) {
   const name = formData.get("name")?.trim();
   const category = formData.get("category") || "primary_jhs";
   if (!name) return;
-  await supabase.from("subjects").insert({ name, category }).select().single();
+
+  const { error } = await supabase.from("subjects").insert({ name, category }).select().single();
+  if (error) {
+    console.error("addSubject failed:", error);
+    throw new Error(`Could not add subject: ${error.message}`);
+  }
+
   revalidatePath("/grades");
 }
 
@@ -32,7 +38,7 @@ export async function addSubject(formData) {
 export async function saveAllMarks(formData) {
   const supabase = createClient();
   const classroomId = formData.get("classroomId");
-  const subjectName = formData.get("subjectName");
+  const subjectId = formData.get("subjectId");
   const term = formData.get("term");
 
   const {
@@ -42,14 +48,20 @@ export async function saveAllMarks(formData) {
   // Ensure the three exam rows exist for this subject/term/classroom, and get their ids
   const examIds = {};
   for (const [examType, totalMarks] of Object.entries(TOTALS)) {
-    const { data: examRow } = await supabase
+    const { data: examRow, error: examError } = await supabase
       .from("exams")
       .upsert(
-        { classroom_id: classroomId, subject_name: subjectName, term, exam_type: examType, total_marks: totalMarks },
-        { onConflict: "classroom_id,subject_name,term,exam_type" }
+        { classroom_id: classroomId, subject_id: subjectId, term, exam_type: examType, total_marks: totalMarks },
+        { onConflict: "classroom_id,subject_id,term,exam_type" }
       )
       .select("id")
       .single();
+
+    if (examError) {
+      console.error(`saveAllMarks: failed to upsert exam row for ${examType}:`, examError);
+      throw new Error(`Could not save marks (exam setup failed): ${examError.message}`);
+    }
+
     if (examRow) examIds[examType] = examRow.id;
   }
 
@@ -76,8 +88,16 @@ export async function saveAllMarks(formData) {
   }
 
   if (rows.length > 0) {
-    await supabase.from("results").upsert(rows, { onConflict: "exam_id,student_id" });
+    const { error: resultsError } = await supabase
+      .from("results")
+      .upsert(rows, { onConflict: "exam_id,student_id" });
+
+    if (resultsError) {
+      console.error("saveAllMarks: failed to upsert results:", resultsError);
+      throw new Error(`Could not save marks: ${resultsError.message}`);
+    }
   }
 
   revalidatePath("/grades");
+  revalidatePath("/report-card");
 }
