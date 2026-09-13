@@ -271,6 +271,13 @@ export default async function ParentPage({ searchParams }) {
                   <p className="text-xs text-stone-400">No grades recorded for {selectedTerm} yet.</p>
                 )}
               </div>
+
+              <a
+                href={`/parent/report-card?studentId=${child.id}&term=${selectedTerm}`}
+                className="inline-block text-xs font-medium text-pine hover:underline"
+              >
+                View / print full report card →
+              </a>
             </div>
           ))}
           {childData.length === 0 && (
