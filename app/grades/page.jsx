@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function GradesPage({ searchParams }) {
   const supabase = createClient();
   const selectedClassroomId = searchParams?.classroomId;
-  const selectedSubject = searchParams?.subject;
+  const selectedSubjectId = searchParams?.subject; // now a subject id, not a name
   const selectedTerm = searchParams?.term || "Term 1";
 
   const {
@@ -25,7 +25,16 @@ export default async function GradesPage({ searchParams }) {
       a.academic_levels.sort_order - b.academic_levels.sort_order ||
       a.section.localeCompare(b.section)
   );
-if (myProfile?.role === "teacher") { const { data: assignedRows } = await supabase .from("teacher_classrooms") .select("classroom_id") .eq("teacher_id", user.id); const assignedIds = new Set((assignedRows || []).map((r) => r.classroom_id)); classrooms = classrooms.filter((c) => assignedIds.has(c.id)); }
+
+  if (myProfile?.role === "teacher") {
+    const { data: assignedRows } = await supabase
+      .from("teacher_classrooms")
+      .select("classroom_id")
+      .eq("teacher_id", user.id);
+    const assignedIds = new Set((assignedRows || []).map((r) => r.classroom_id));
+    classrooms = classrooms.filter((c) => assignedIds.has(c.id));
+  }
+
   const { data: subjects } = await supabase.from("subjects").select("id, name, category").order("name");
 
   let students = [];
@@ -39,6 +48,7 @@ if (myProfile?.role === "teacher") { const { data: assignedRows } = await supaba
   }
 
   const filteredSubjects = (subjects || []).filter((s) => s.category === levelCategory);
+  const selectedSubjectName = filteredSubjects.find((s) => s.id === selectedSubjectId)?.name || "";
 
   if (selectedClassroomId) {
     const { data: studentsData } = await supabase
@@ -50,12 +60,12 @@ if (myProfile?.role === "teacher") { const { data: assignedRows } = await supaba
     students = studentsData || [];
   }
 
-  if (selectedClassroomId && selectedSubject) {
+  if (selectedClassroomId && selectedSubjectId) {
     const { data: exams } = await supabase
       .from("exams")
       .select("id, exam_type")
       .eq("classroom_id", selectedClassroomId)
-      .eq("subject_name", selectedSubject)
+      .eq("subject_id", selectedSubjectId)
       .eq("term", selectedTerm);
 
     const examIdByType = {};
@@ -109,11 +119,11 @@ if (myProfile?.role === "teacher") { const { data: assignedRows } = await supaba
               <input type="hidden" name="classroomId" value={selectedClassroomId} />
               <AutoSubmitSelect
                 name="subject"
-                defaultValue={selectedSubject || ""}
+                defaultValue={selectedSubjectId || ""}
                 className="flex-1 min-w-[180px] rounded-lg border border-stone-300 px-3 py-2 text-sm"
                 options={[
                   { value: "", label: "Select a subject", disabled: true },
-                  ...filteredSubjects.map((s) => ({ value: s.name, label: s.name })),
+                  ...filteredSubjects.map((s) => ({ value: s.id, label: s.name })),
                 ]}
               />
               <AutoSubmitSelect
@@ -147,14 +157,14 @@ if (myProfile?.role === "teacher") { const { data: assignedRows } = await supaba
               </form>
             </details>
 
-            {selectedSubject && (
+            {selectedSubjectId && (
               <form action={saveAllMarks} className="bg-white rounded-xl border border-stone-200 overflow-hidden">
                 <input type="hidden" name="classroomId" value={selectedClassroomId} />
-                <input type="hidden" name="subjectName" value={selectedSubject} />
+                <input type="hidden" name="subjectId" value={selectedSubjectId} />
                 <input type="hidden" name="term" value={selectedTerm} />
                 <div className="p-4 border-b border-stone-100">
                   <p className="text-sm font-medium text-ink">
-                    {selectedSubject} — {selectedTerm}
+                    {selectedSubjectName} — {selectedTerm}
                   </p>
                 </div>
                 <table className="w-full text-sm">
