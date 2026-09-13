@@ -97,17 +97,17 @@ export default async function ReportCardPage({ searchParams }) {
 
     const { data: exams } = await supabase
       .from("exams")
-      .select("id, subject_name, exam_type")
+      .select("id, subject_id, exam_type")
       .eq("classroom_id", selectedClassroomId)
       .eq("term", selectedTerm);
     const examIds = (exams || []).map((e) => e.id);
-    const subjects = [...new Set((exams || []).map((e) => e.subject_name))];
+    const subjectIds = [...new Set((exams || []).map((e) => e.subject_id))];
 
     let allResults = [];
     if (examIds.length > 0) {
       const { data: resultsData } = await supabase
         .from("results")
-        .select("student_id, score, exams(subject_name, exam_type)")
+        .select("student_id, score, exams(subject_id, exam_type)")
         .in("exam_id", examIds);
       allResults = resultsData || [];
     }
@@ -115,14 +115,14 @@ export default async function ReportCardPage({ searchParams }) {
     const studentTotals = {};
     allResults.forEach((r) => {
       const sid = r.student_id;
-      const subj = r.exams.subject_name;
+      const subj = r.exams.subject_id;
       if (!studentTotals[sid]) studentTotals[sid] = {};
       if (!studentTotals[sid][subj]) studentTotals[sid][subj] = {};
       studentTotals[sid][subj][r.exams.exam_type] = { score: r.score };
     });
 
     const overallEntries = (classmates || []).map((c) => {
-      const value = subjects.reduce((sum, subj) => sum + subjectTotal(studentTotals[c.id]?.[subj]), 0);
+      const value = subjectIds.reduce((sum, subj) => sum + subjectTotal(studentTotals[c.id]?.[subj]), 0);
       return { id: c.id, value };
     });
     const { map: overallMap, outOf } = rankMap(overallEntries);
@@ -156,17 +156,18 @@ export default async function ReportCardPage({ searchParams }) {
 
     const { data: exams } = await supabase
       .from("exams")
-      .select("id, subject_name, exam_type")
+      .select("id, subject_id, exam_type, subjects(name)")
       .eq("classroom_id", selectedClassroomId)
       .eq("term", selectedTerm);
     const examIds = (exams || []).map((e) => e.id);
-    const subjects = [...new Set((exams || []).map((e) => e.subject_name))];
+    const subjectNameById = new Map((exams || []).map((e) => [e.subject_id, e.subjects?.name || "Unknown"]));
+    const subjectIds = [...subjectNameById.keys()];
 
     let allResults = [];
     if (examIds.length > 0) {
       const { data: resultsData } = await supabase
         .from("results")
-        .select("student_id, score, exams(subject_name, exam_type)")
+        .select("student_id, score, exams(subject_id, exam_type)")
         .in("exam_id", examIds);
       allResults = resultsData || [];
     }
@@ -174,22 +175,22 @@ export default async function ReportCardPage({ searchParams }) {
     const studentTotals = {};
     allResults.forEach((r) => {
       const sid = r.student_id;
-      const subj = r.exams.subject_name;
+      const subj = r.exams.subject_id;
       if (!studentTotals[sid]) studentTotals[sid] = {};
       if (!studentTotals[sid][subj]) studentTotals[sid][subj] = {};
       studentTotals[sid][subj][r.exams.exam_type] = { score: r.score };
     });
 
-    const subjectRows = subjects.map((subject) => {
+    const subjectRows = subjectIds.map((subjectId) => {
       const entries = (classmates || []).map((c) => ({
         id: c.id,
-        value: subjectTotal(studentTotals[c.id]?.[subject]),
+        value: subjectTotal(studentTotals[c.id]?.[subjectId]),
       }));
       const { map, outOf } = rankMap(entries);
-      const t = studentTotals[selectedStudentId]?.[subject];
+      const t = studentTotals[selectedStudentId]?.[subjectId];
       const total = subjectTotal(t);
       return {
-        subject,
+        subject: subjectNameById.get(subjectId),
         ca: (t?.["Class Exercise/Assignment"]?.score || 0) + (t?.["Mid-term"]?.score || 0),
         exam: t?.["End-of-term"]?.score ?? null,
         total,
@@ -200,7 +201,7 @@ export default async function ReportCardPage({ searchParams }) {
     });
 
     const overallEntries = (classmates || []).map((c) => {
-      const value = subjects.reduce((sum, subj) => sum + subjectTotal(studentTotals[c.id]?.[subj]), 0);
+      const value = subjectIds.reduce((sum, subj) => sum + subjectTotal(studentTotals[c.id]?.[subj]), 0);
       return { id: c.id, value };
     });
     const { map: overallMap } = rankMap(overallEntries);
