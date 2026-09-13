@@ -1,22 +1,29 @@
 "use server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { buildUsername, usernameToAuthEmail } from "@/lib/username";
+import { normalizePhone } from "@/lib/phone";
 import { revalidatePath } from "next/cache";
 
 export async function createStaffUser(prevState, formData) {
   const supabase = createClient();
   const admin = createAdminClient();
   const fullName = formData.get("fullName")?.trim();
-  const email = formData.get("email")?.trim();
+  const rawIdentifier = formData.get("phone")?.trim();
   const password = formData.get("password");
   const role = formData.get("role");
-  const phone = formData.get("phone")?.trim() || null;
   const studentId = formData.get("studentId") || null;
-  if (!fullName || !email || !password || !role) {
-    return { error: "Please fill in name, email, password, and role." };
+  if (!fullName || !rawIdentifier || !password || !role) {
+    return { error: "Please fill in name, phone number, password, and role." };
   }
+  if (password.trim().length < 6) {
+    return { error: "Password must be at least 6 characters." };
+  }
+  const username = buildUsername(rawIdentifier); // "GFA" + digits, e.g. GFA0245117679
+  const phone = normalizePhone(username.slice(3)); // real phone, stored for contact/display
+  const authEmail = usernameToAuthEmail(username);
   const { data: created, error } = await admin.auth.admin.createUser({
-    email,
+    email: authEmail,
     password,
     email_confirm: true,
   });

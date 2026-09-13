@@ -25,16 +25,25 @@ export default function CreateUserForm({ classrooms, students }) {
           <input name="fullName" required className="w-full mt-1 rounded-lg border border-stone-300 px-3 py-2 text-sm" />
         </div>
         <div className="col-span-2">
-          <label className="text-xs font-medium text-stone-500">Email</label>
-          <input name="email" type="email" required className="w-full mt-1 rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+          <label className="text-xs font-medium text-stone-500">Phone number (becomes their username)</label>
+          <input
+            name="phone"
+            type="tel"
+            required
+            placeholder="0245117679 → login as GFA0245117679"
+            className="w-full mt-1 rounded-lg border border-stone-300 px-3 py-2 text-sm"
+          />
         </div>
-        <div>
+        <div className="col-span-2">
           <label className="text-xs font-medium text-stone-500">Password</label>
-          <input name="password" type="text" required minLength={6} placeholder="min 6 characters" className="w-full mt-1 rounded-lg border border-stone-300 px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-stone-500">Phone (optional)</label>
-          <input name="phone" className="w-full mt-1 rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+          <input
+            name="password"
+            type="text"
+            required
+            minLength={6}
+            placeholder="Choose a password, min 6 characters"
+            className="w-full mt-1 rounded-lg border border-stone-300 px-3 py-2 text-sm"
+          />
         </div>
         <div className="col-span-2">
           <label className="text-xs font-medium text-stone-500">Role</label>

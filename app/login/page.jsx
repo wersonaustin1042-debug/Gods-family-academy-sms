@@ -3,13 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { buildUsername, usernameToAuthEmail } from "@/lib/username";
 
 const ADMIN_LIKE = ["admin", "director", "headmaster", "assistant_headmaster"];
 
 export default function LoginPage() {
   const router = useRouter();
   const supabase = createClient();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -19,7 +20,10 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const trimmed = identifier.trim();
+    const authEmail = trimmed.includes("@") ? trimmed : usernameToAuthEmail(buildUsername(trimmed));
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password });
     if (error) {
       setLoading(false);
       setError(error.message);
@@ -64,14 +68,14 @@ export default function LoginPage() {
             <p className="text-sm text-clay bg-clay/10 border border-clay/30 rounded-lg px-3 py-2">{error}</p>
           )}
           <div>
-            <label className="text-xs font-medium text-stone-500">Email</label>
+            <label className="text-xs font-medium text-stone-500">Username or Email</label>
             <input
-              type="email"
+              type="text"
               required
               className="w-full mt-1 rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pine/40"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@godsfamily.edu.gh"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="GFA0245117679 or you@godsfamily.edu.gh"
             />
           </div>
           <div>
