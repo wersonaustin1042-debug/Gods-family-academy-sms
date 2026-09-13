@@ -231,7 +231,7 @@ export default async function ParentReportCardPage({ searchParams }) {
           />
         </form>
 
-        {detail && activeClassroom && (
+        {detail && activeClassroom && detail.subjectRows.length > 0 && (
           <div className="bg-white rounded-xl border border-stone-200 p-5 print:shadow-none print:border-0 print:p-0">
             {/* Header */}
             <div className="relative text-center pb-2 mb-3">
@@ -357,8 +357,13 @@ export default async function ParentReportCardPage({ searchParams }) {
           </div>
         )}
 
-        {!detail && (
-          <p className="text-sm text-stone-400">No report card available for {selectedTerm} yet.</p>
+        {(!detail || !activeClassroom || detail.subjectRows.length === 0) && (
+          <div className="bg-white rounded-xl border border-stone-200 p-6 text-center">
+            <p className="text-sm font-medium text-ink mb-1">Report card not ready yet</p>
+            <p className="text-xs text-stone-400">
+              The school hasn't finished entering grades for {selectedTerm}. Please check back later.
+            </p>
+          </div>
         )}
       </main>
     </div>
