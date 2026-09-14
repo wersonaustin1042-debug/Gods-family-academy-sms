@@ -112,3 +112,27 @@ export async function setClassTeacher(formData) {
   await supabase.from("classrooms").update({ class_teacher_id: teacherId }).eq("id", classroomId);
   revalidatePath("/users");
 }
+
+// Sets exactly which subjects a teacher is allowed to grade for one
+// classroom they're assigned to — full replace of that (teacher, classroom)
+// pair each time this is submitted.
+export async function assignTeacherSubjects(formData) {
+  const supabase = createClient();
+  const teacherId = formData.get("teacherId");
+  const classroomId = formData.get("classroomId");
+  const subjectIds = formData.getAll("subjectIds").filter(Boolean);
+  if (!teacherId || !classroomId) return;
+
+  await supabase
+    .from("teacher_subjects")
+    .delete()
+    .eq("teacher_id", teacherId)
+    .eq("classroom_id", classroomId);
+
+  if (subjectIds.length > 0) {
+    await supabase
+      .from("teacher_subjects")
+      .insert(subjectIds.map((subjectId) => ({ teacher_id: teacherId, classroom_id: classroomId, subject_id: subjectId })));
+  }
+  revalidatePath("/users");
+}

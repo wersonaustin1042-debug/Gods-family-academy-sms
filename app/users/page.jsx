@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import Sidebar from "@/components/Sidebar";
-import { linkParentToChild, assignTeacherToClassrooms, unassignTeacherFromClassroom, setClassTeacher } from "./actions";
+import { linkParentToChild, assignTeacherToClassrooms, unassignTeacherFromClassroom, setClassTeacher, assignTeacherSubjects } from "./actions";
 import CreateUserForm from "./CreateUserForm";
 
 export const dynamic = "force-dynamic";
@@ -41,14 +41,25 @@ export default async function UsersPage() {
 
   const { data: teacherAssignments } = await supabase
     .from("teacher_classrooms")
-    .select("teacher_id, classroom_id, classrooms(section, academic_levels(name))");
+    .select("teacher_id, classroom_id, classrooms(section, academic_levels(name, sort_order))");
+
+  const { data: allSubjects } = await supabase.from("subjects").select("id, name, category").order("name");
+  const { data: teacherSubjectRows } = await supabase.from("teacher_subjects").select("teacher_id, classroom_id, subject_id");
+  const subjectIdsByTeacherClassroom = {};
+  (teacherSubjectRows || []).forEach((r) => {
+    const key = `${r.teacher_id}:${r.classroom_id}`;
+    if (!subjectIdsByTeacherClassroom[key]) subjectIdsByTeacherClassroom[key] = new Set();
+    subjectIdsByTeacherClassroom[key].add(r.subject_id);
+  });
 
   const assignmentsByTeacher = {};
   (teacherAssignments || []).forEach((a) => {
     if (!assignmentsByTeacher[a.teacher_id]) assignmentsByTeacher[a.teacher_id] = [];
+    const category = (a.classrooms?.academic_levels?.sort_order ?? 99) <= 5 ? "preschool" : "primary_jhs";
     assignmentsByTeacher[a.teacher_id].push({
       classroomId: a.classroom_id,
       label: `${a.classrooms?.academic_levels?.name} ${a.classrooms?.section}`,
+      subjectOptions: (allSubjects || []).filter((s) => s.category === category),
     });
   });
 
@@ -158,25 +169,61 @@ export default async function UsersPage() {
               </button>
             </form>
 
-            {/* Current assignments per teacher, with remove option */}
+            {/* Current assignments per teacher, with remove option and per-class subject picker */}
             <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
               {teachers.map((t) => (
                 <div key={t.id} className="p-3">
                   <p className="text-xs font-medium text-ink mb-1.5">{t.full_name}</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(assignmentsByTeacher[t.id] || []).map((a) => (
-                      <form key={a.classroomId} action={unassignTeacherFromClassroom}>
-                        <input type="hidden" name="teacherId" value={t.id} />
-                        <input type="hidden" name="classroomId" value={a.classroomId} />
-                        <button
-                          type="submit"
-                          className="text-[11px] bg-stone-100 hover:bg-clay/10 hover:text-clay text-stone-600 px-2 py-1 rounded-full"
-                          title="Tap to remove"
-                        >
-                          {a.label} ×
-                        </button>
-                      </form>
-                    ))}
+                  <div className="space-y-2">
+                    {(assignmentsByTeacher[t.id] || []).map((a) => {
+                      const checkedIds = subjectIdsByTeacherClassroom[`${t.id}:${a.classroomId}`] || new Set();
+                      return (
+                        <div key={a.classroomId} className="border border-stone-100 rounded-lg p-2">
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <span className="text-xs text-stone-600 font-medium">{a.label}</span>
+                            <form action={unassignTeacherFromClassroom}>
+                              <input type="hidden" name="teacherId" value={t.id} />
+                              <input type="hidden" name="classroomId" value={a.classroomId} />
+                              <button
+                                type="submit"
+                                className="text-[11px] bg-stone-100 hover:bg-clay/10 hover:text-clay text-stone-600 px-2 py-1 rounded-full"
+                                title="Tap to remove this class"
+                              >
+                                Remove class ×
+                              </button>
+                            </form>
+                          </div>
+                          <form action={assignTeacherSubjects} className="flex flex-wrap items-center gap-1.5">
+                            <input type="hidden" name="teacherId" value={t.id} />
+                            <input type="hidden" name="classroomId" value={a.classroomId} />
+                            {a.subjectOptions.map((s) => (
+                              <label
+                                key={s.id}
+                                className="flex items-center gap-1 text-[11px] bg-stone-50 border border-stone-200 rounded-full px-2 py-1 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  name="subjectIds"
+                                  value={s.id}
+                                  defaultChecked={checkedIds.has(s.id)}
+                                  className="accent-pine"
+                                />
+                                {s.name}
+                              </label>
+                            ))}
+                            {a.subjectOptions.length === 0 && (
+                              <span className="text-[11px] text-stone-400">No subjects set up for this level yet.</span>
+                            )}
+                            <button
+                              type="submit"
+                              className="text-[11px] font-medium bg-pine text-paper px-2.5 py-1 rounded-full"
+                            >
+                              Save subjects
+                            </button>
+                          </form>
+                        </div>
+                      );
+                    })}
                     {(!assignmentsByTeacher[t.id] || assignmentsByTeacher[t.id].length === 0) && (
                       <span className="text-xs text-stone-400">No classes assigned yet.</span>
                     )}

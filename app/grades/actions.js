@@ -45,6 +45,20 @@ export async function saveAllMarks(formData) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const { data: myProfile } = await supabase.from("profiles").select("role").eq("id", user?.id).single();
+  if (myProfile?.role === "teacher") {
+    const { data: allowed } = await supabase
+      .from("teacher_subjects")
+      .select("subject_id")
+      .eq("teacher_id", user.id)
+      .eq("classroom_id", classroomId)
+      .eq("subject_id", subjectId)
+      .maybeSingle();
+    if (!allowed) {
+      throw new Error("You're not assigned to teach this subject for this class.");
+    }
+  }
+
   // Ensure the three exam rows exist for this subject/term/classroom, and get their ids
   const examIds = {};
   for (const [examType, totalMarks] of Object.entries(TOTALS)) {
