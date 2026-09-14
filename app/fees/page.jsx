@@ -2,9 +2,19 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import Sidebar from "@/components/Sidebar";
 import AutoSubmitSelect from "@/components/AutoSubmitSelect";
-import { ensureFeeSetup, changeFrequency, changeAmount, saveRecurringMonth, saveTuitionMonth } from "./actions";
+import {
+  ensureFeeSetup,
+  changeFrequency,
+  changeAmount,
+  saveRecurringMonth,
+  saveTuitionMonth,
+  updateTuitionAmounts,
+  updateDefaultTuition,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
+
+const ADMIN_LIKE = ["admin", "director", "headmaster", "assistant_headmaster"];
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -108,6 +118,14 @@ export default async function FeesPage({ searchParams }) {
   if (isTeacher) {
     classrooms = [];
   }
+  const canManage = ADMIN_LIKE.includes(myProfile?.role);
+
+  const { data: defaultTuitionSetting } = await supabase
+    .from("fee_settings")
+    .select("value")
+    .eq("key", "default_tuition")
+    .maybeSingle();
+  const defaultTuition = Number(defaultTuitionSetting?.value ?? 1200);
 
   let classStudents = [];
   let statusByStudent = {};
@@ -145,7 +163,7 @@ export default async function FeesPage({ searchParams }) {
 
     const { data: planData } = await supabase
       .from("tuition_plans")
-      .select("total_amount, amount_paid")
+      .select("total_amount, amount_paid, standard_amount, discount_amount")
       .eq("student_id", selectedStudentId)
       .single();
     plan = planData;
@@ -200,6 +218,28 @@ export default async function FeesPage({ searchParams }) {
       <main className="flex-1 p-5 sm:p-8 max-w-3xl">
         <h1 className="font-display text-2xl font-semibold text-ink mb-1">Fees & payments</h1>
         <p className="text-stone-500 text-sm mb-6">Pick a class, then a student, then record exact amounts by day.</p>
+
+        {canManage && (
+          <form
+            action={updateDefaultTuition}
+            className="flex items-center gap-2 bg-white rounded-xl border border-stone-200 p-3 mb-6 text-sm"
+          >
+            <span className="text-stone-500">Default tuition for new enrollments:</span>
+            <span className="text-stone-400">GHS</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              name="defaultTuition"
+              defaultValue={defaultTuition}
+              className="w-24 rounded-lg border border-stone-300 px-2 py-1 text-sm"
+            />
+            <button type="submit" className="text-xs font-medium bg-pine text-paper px-3 py-1.5 rounded-lg">
+              Save
+            </button>
+            <span className="text-xs text-stone-400">Only applies to students enrolled after this change.</span>
+          </form>
+        )}
 
         <div className="flex flex-wrap gap-2 mb-6">
           {classrooms.map((c) => (
@@ -300,6 +340,49 @@ export default async function FeesPage({ searchParams }) {
                 <div className="h-full bg-pine rounded-full" style={{ width: `${pct}%` }} />
               </div>
               <p className="text-xs text-stone-400">GHS {plan.amount_paid} of GHS {plan.total_amount} paid ({pct}%)</p>
+
+              {canManage ? (
+                <form
+                  action={updateTuitionAmounts}
+                  className="flex flex-wrap items-end gap-3 pt-2 mt-2 border-t border-stone-100"
+                >
+                  <input type="hidden" name="studentId" value={selectedStudentId} />
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-stone-400">Standard tuition (GHS)</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      name="standardAmount"
+                      defaultValue={plan.standard_amount}
+                      className="w-28 rounded-lg border border-stone-300 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-stone-400">Discount (GHS)</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      name="discountAmount"
+                      defaultValue={plan.discount_amount}
+                      className="w-24 rounded-lg border border-stone-300 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <button type="submit" className="text-xs font-medium bg-pine text-paper px-3 py-2 rounded-lg">
+                    Save
+                  </button>
+                  <p className="text-[11px] text-stone-400 basis-full">
+                    Sets what this student is billed to GHS {plan.total_amount} (standard minus discount).
+                  </p>
+                </form>
+              ) : (
+                Number(plan.discount_amount) > 0 && (
+                  <p className="text-xs text-stone-400 pt-1">
+                    GHS {plan.discount_amount} discount applied (standard GHS {plan.standard_amount}).
+                  </p>
+                )
+              )}
             </div>
 
             <CalendarGrid

@@ -11,7 +11,19 @@ export async function ensureFeeSetup(studentId) {
     .eq("student_id", studentId)
     .maybeSingle();
   if (!plan) {
-    await supabase.from("tuition_plans").insert({ student_id: studentId, total_amount: 1200, amount_paid: 0 });
+    const { data: setting } = await supabase
+      .from("fee_settings")
+      .select("value")
+      .eq("key", "default_tuition")
+      .maybeSingle();
+    const standard = Number(setting?.value ?? 1200);
+    await supabase.from("tuition_plans").insert({
+      student_id: studentId,
+      standard_amount: standard,
+      discount_amount: 0,
+      total_amount: standard,
+      amount_paid: 0,
+    });
   }
   const { data: existingFees } = await supabase
     .from("recurring_fees")
@@ -26,6 +38,37 @@ export async function ensureFeeSetup(studentId) {
       amount: 10, // default — edit per school from the fees page
     });
   }
+}
+
+// Admin-like only (enforced in the UI + could add an RLS check, but
+// tuition_plans is already admin-like-only for writes via existing policy).
+// Recomputes total_amount so every page that reads it (fees-owing,
+// fees-overview, report cards, parent portal, dashboard) keeps working
+// unchanged — they only ever see the net amount owed.
+export async function updateTuitionAmounts(formData) {
+  const supabase = createClient();
+  const studentId = formData.get("studentId");
+  const standardAmount = Number(formData.get("standardAmount"));
+  const discountAmount = Number(formData.get("discountAmount"));
+  if (Number.isNaN(standardAmount) || standardAmount < 0) return;
+  if (Number.isNaN(discountAmount) || discountAmount < 0) return;
+
+  const total = Math.max(standardAmount - discountAmount, 0);
+  await supabase
+    .from("tuition_plans")
+    .update({ standard_amount: standardAmount, discount_amount: discountAmount, total_amount: total })
+    .eq("student_id", studentId);
+  revalidatePath("/fees");
+}
+
+// Changes the standard tuition new enrollments get by default. Does not
+// touch any existing student's tuition_plans row.
+export async function updateDefaultTuition(formData) {
+  const supabase = createClient();
+  const value = Number(formData.get("defaultTuition"));
+  if (Number.isNaN(value) || value < 0) return;
+  await supabase.from("fee_settings").upsert({ key: "default_tuition", value });
+  revalidatePath("/fees");
 }
 
 export async function changeFrequency(formData) {
