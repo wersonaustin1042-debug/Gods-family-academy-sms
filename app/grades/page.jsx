@@ -2,9 +2,19 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import Sidebar from "@/components/Sidebar";
 import AutoSubmitSelect from "@/components/AutoSubmitSelect";
+import { ALL_TYPES, MAX_BY_TYPE, SBA_MAX_EACH, SBA_MAX_TOTAL, EXAM_MAX } from "@/lib/grading";
 import { saveAllMarks, addSubject } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+const TYPE_TO_KEY = { "SBA 1": "sba1", "SBA 2": "sba2", "SBA 3": "sba3", "SBA 4": "sba4", Exam: "exam" };
+const COLUMNS = [
+  { key: "sba1", label: "SBA 1", max: MAX_BY_TYPE["SBA 1"] },
+  { key: "sba2", label: "SBA 2", max: MAX_BY_TYPE["SBA 2"] },
+  { key: "sba3", label: "SBA 3", max: MAX_BY_TYPE["SBA 3"] },
+  { key: "sba4", label: "SBA 4", max: MAX_BY_TYPE["SBA 4"] },
+  { key: "exam", label: "Exam", max: EXAM_MAX },
+];
 
 export default async function GradesPage({ searchParams }) {
   const supabase = createClient();
@@ -50,7 +60,7 @@ export default async function GradesPage({ searchParams }) {
   const { data: subjects } = await supabase.from("subjects").select("id, name, category").order("name");
 
   let students = [];
-  let existing = {}; // existing[studentId] = { ca, mid, end }
+  let existing = {}; // existing[studentId] = { sba1..sba4, exam, dnw }
   let levelCategory = "primary_jhs";
 
   if (selectedClassroomId) {
@@ -81,7 +91,8 @@ export default async function GradesPage({ searchParams }) {
       .select("id, exam_type")
       .eq("classroom_id", selectedClassroomId)
       .eq("subject_id", selectedSubjectId)
-      .eq("term", selectedTerm);
+      .eq("term", selectedTerm)
+      .in("exam_type", ALL_TYPES);
 
     const examIdByType = {};
     (exams || []).forEach((e) => (examIdByType[e.exam_type] = e.id));
@@ -90,15 +101,16 @@ export default async function GradesPage({ searchParams }) {
     if (examIds.length > 0) {
       const { data: results } = await supabase
         .from("results")
-        .select("student_id, score, exams(exam_type)")
+        .select("student_id, score, did_not_write, exams(exam_type)")
         .in("exam_id", examIds);
 
       (results || []).forEach((r) => {
-        const key = { "Class Exercise/Assignment": "ca", "Mid-term": "mid", "End-of-term": "end" }[
-          r.exams.exam_type
-        ];
+        const key = TYPE_TO_KEY[r.exams.exam_type];
+        if (!key) return;
         if (!existing[r.student_id]) existing[r.student_id] = {};
-        existing[r.student_id][key] = r.score;
+        // A "did not write" box shows empty; the tick below carries the 0
+        existing[r.student_id][key] = r.did_not_write ? "" : r.score;
+        if (r.did_not_write) existing[r.student_id].dnw = true;
       });
     }
   }
@@ -109,7 +121,8 @@ export default async function GradesPage({ searchParams }) {
       <main className="flex-1 p-5 sm:p-8 max-w-3xl">
         <h1 className="font-display text-2xl font-semibold text-ink mb-1">Grades</h1>
         <p className="text-stone-500 text-sm mb-6">
-          Pick a class and subject, then enter Class Exercise/Assignment, Mid-term, and End-of-term marks together.
+          Pick a class and subject, then enter the four SBA marks (out of {SBA_MAX_EACH} each, {SBA_MAX_TOTAL} in total)
+          and the Exam mark (out of {EXAM_MAX}) together. Marks are not rounded.
         </p>
 
         <div className="flex flex-wrap gap-2 mb-6">
@@ -188,63 +201,61 @@ export default async function GradesPage({ searchParams }) {
                     {selectedSubjectName} — {selectedTerm}
                   </p>
                 </div>
-                <table className="w-full text-sm">
-                  <thead className="bg-stone-50 text-stone-500 text-xs uppercase">
-                    <tr>
-                      <th className="text-left px-4 py-2 font-medium">Student</th>
-                      <th className="text-center px-3 py-2 font-medium">Class Ex./Assign. (10)</th>
-                      <th className="text-center px-3 py-2 font-medium">Mid-term (20)</th>
-                      <th className="text-center px-3 py-2 font-medium">End-of-term (70)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {students.map((s) => (
-                      <tr key={s.id} className="border-t border-stone-100">
-                        <td className="px-4 py-2 text-ink">{s.full_name}</td>
-                        <td className="px-2 py-2">
-                          <input
-                            type="number"
-                            name={`ca__${s.id}`}
-                            min="0"
-                            max="10"
-                            step="0.5"
-                            defaultValue={existing[s.id]?.ca ?? ""}
-                            className="w-16 mx-auto block rounded-lg border border-stone-300 px-2 py-1 text-sm text-center"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            type="number"
-                            name={`mid__${s.id}`}
-                            min="0"
-                            max="20"
-                            step="0.5"
-                            defaultValue={existing[s.id]?.mid ?? ""}
-                            className="w-16 mx-auto block rounded-lg border border-stone-300 px-2 py-1 text-sm text-center"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            type="number"
-                            name={`end__${s.id}`}
-                            min="0"
-                            max="70"
-                            step="0.5"
-                            defaultValue={existing[s.id]?.end ?? ""}
-                            className="w-16 mx-auto block rounded-lg border border-stone-300 px-2 py-1 text-sm text-center"
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                    {students.length === 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-stone-50 text-stone-500 text-xs uppercase">
                       <tr>
-                        <td colSpan={4} className="px-4 py-6 text-center text-stone-400">
-                          No students in this class.
-                        </td>
+                        <th className="text-left px-4 py-2 font-medium">Student</th>
+                        {COLUMNS.map((c) => (
+                          <th key={c.key} className="text-center px-2 py-2 font-medium whitespace-nowrap">
+                            {c.label} <span className="text-stone-400 normal-case">({c.max})</span>
+                          </th>
+                        ))}
+                        <th className="text-center px-3 py-2 font-medium whitespace-nowrap">Did not write</th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {students.map((s) => (
+                        <tr key={s.id} className="border-t border-stone-100">
+                          <td className="px-4 py-2 text-ink">{s.full_name}</td>
+                          {COLUMNS.map((c) => (
+                            <td key={c.key} className="px-2 py-2">
+                              <input
+                                type="number"
+                                name={`${c.key}__${s.id}`}
+                                min="0"
+                                max={c.max}
+                                step="any"
+                                defaultValue={existing[s.id]?.[c.key] ?? ""}
+                                className="w-16 mx-auto block rounded-lg border border-stone-300 px-2 py-1 text-sm text-center"
+                              />
+                            </td>
+                          ))}
+                          <td className="px-3 py-2 text-center">
+                            <input
+                              type="checkbox"
+                              name={`dnw__${s.id}`}
+                              defaultChecked={!!existing[s.id]?.dnw}
+                              aria-label={`${s.full_name} did not write`}
+                              className="h-4 w-4 accent-pine"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                      {students.length === 0 && (
+                        <tr>
+                          <td colSpan={COLUMNS.length + 2} className="px-4 py-6 text-center text-stone-400">
+                            No students in this class.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="px-4 pb-1 text-xs text-stone-400">
+                  Leave a box empty if the mark isn't in yet. Tick "Did not write" and any empty box is saved as 0 and
+                  labelled "Did not write" on the report card.
+                </p>
                 <div className="p-4">
                   <button
                     type="submit"

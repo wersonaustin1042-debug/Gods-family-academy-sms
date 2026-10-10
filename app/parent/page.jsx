@@ -1,6 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import Sidebar from "@/components/Sidebar";
 import AutoSubmitSelect from "@/components/AutoSubmitSelect";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  loadGradingConfig,
+  loadTermResults,
+  buildPupilCard,
+  scaleKeyForLevel,
+  fmt,
+} from "@/lib/grading";
 
 export const dynamic = "force-dynamic";
 
@@ -14,38 +22,6 @@ function getPeriodKey(frequency, date = new Date()) {
   return date.toISOString().slice(0, 7);
 }
 
-function subjectTotal(t) {
-  const ca = (t?.["Class Exercise/Assignment"]?.score || 0) + (t?.["Mid-term"]?.score || 0);
-  const exam = t?.["End-of-term"]?.score || 0;
-  const hasAny = t?.["Class Exercise/Assignment"] || t?.["Mid-term"] || t?.["End-of-term"];
-  return hasAny ? ca + exam : 0;
-}
-
-function remarkFor(total) {
-  if (total >= 90) return "EXCELLENT";
-  if (total >= 80) return "VERY GOOD";
-  if (total >= 60) return "GOOD";
-  if (total >= 50) return "AVERAGE";
-  if (total >= 40) return "BELOW AVERAGE";
-  return "WEAK";
-}
-
-function ordinal(n) {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
-}
-
-function rankMap(entries) {
-  const sorted = [...entries].sort((a, b) => b.value - a.value);
-  const map = new Map();
-  let rank = 1;
-  sorted.forEach((entry, i) => {
-    if (i > 0 && entry.value < sorted[i - 1].value) rank = i + 1;
-    map.set(entry.id, rank);
-  });
-  return { map, outOf: sorted.length };
-}
 
 export default async function ParentPage({ searchParams }) {
   const supabase = createClient();
@@ -105,67 +81,36 @@ export default async function ParentPage({ searchParams }) {
     }
 
     // ---- Grades for the selected term ----
-    let subjectRows = [];
-    let overallTotal = 0;
-    let overallPosition = "—";
-    let outOf = 0;
+    // Subject positions need the whole class's marks, which a parent can't read directly. The
+    // child is already confirmed as this parent's (via student_guardians above), so a server-side
+    // client reads the class marks only to work out ranks; only this child's marks are shown.
+    let card = null;
 
     if (child.classroom_id) {
-      const { data: exams } = await supabase
-        .from("exams")
-        .select("id, subject_id, exam_type, subjects(name)")
+      const admin = createAdminClient();
+      const { data: classmates } = await admin
+        .from("students")
+        .select("id")
         .eq("classroom_id", child.classroom_id)
-        .eq("term", selectedTerm);
-      const examIds = (exams || []).map((e) => e.id);
-      const subjectIds = [...new Set((exams || []).map((e) => e.subject_id))];
-      const subjectNameById = new Map((exams || []).map((e) => [e.subject_id, e.subjects?.name || "Unknown"]));
-
-      if (examIds.length > 0) {
-        const { data: classmates } = await supabase
-          .from("students")
-          .select("id")
-          .eq("classroom_id", child.classroom_id)
-          .eq("status", "active");
-
-        const { data: allResults } = await supabase
-          .from("results")
-          .select("student_id, score, exams(subject_id, exam_type)")
-          .in("exam_id", examIds);
-
-        const studentTotals = {};
-        (allResults || []).forEach((r) => {
-          const sid = r.student_id;
-          const subj = r.exams.subject_id;
-          if (!studentTotals[sid]) studentTotals[sid] = {};
-          if (!studentTotals[sid][subj]) studentTotals[sid][subj] = {};
-          studentTotals[sid][subj][r.exams.exam_type] = { score: r.score };
+        .eq("status", "active");
+      const termData = await loadTermResults(admin, child.classroom_id, selectedTerm);
+      if (termData.subjectIds.length > 0) {
+        const config = await loadGradingConfig(supabase);
+        const { data: levelRow } = await supabase
+          .from("classrooms")
+          .select("academic_levels(sort_order)")
+          .eq("id", child.classroom_id)
+          .single();
+        const scaleRows = config.scales[scaleKeyForLevel(levelRow?.academic_levels?.sort_order)] || [];
+        card = buildPupilCard({
+          studentId: child.id,
+          classmateIds: (classmates || []).map((c) => c.id),
+          totals: termData.totals,
+          subjectIds: termData.subjectIds,
+          subjectNameById: termData.subjectNameById,
+          scaleRows,
+          bands: config.bands,
         });
-
-        subjectRows = subjectIds.map((subjectId) => {
-          const entries = (classmates || []).map((c) => ({
-            id: c.id,
-            value: subjectTotal(studentTotals[c.id]?.[subjectId]),
-          }));
-          const { map, outOf: subjectOutOf } = rankMap(entries);
-          const t = studentTotals[child.id]?.[subjectId];
-          const total = subjectTotal(t);
-          return {
-            subject: subjectNameById.get(subjectId) || "Unknown",
-            total,
-            grade: total > 0 ? remarkFor(total) : "—",
-            position: map.get(child.id) ? ordinal(map.get(child.id)) : "—",
-            outOf: subjectOutOf,
-          };
-        });
-
-        const overallEntries = (classmates || []).map((c) => {
-          const value = subjectIds.reduce((sum, subjId) => sum + subjectTotal(studentTotals[c.id]?.[subjId]), 0);
-          return { id: c.id, value };
-        });
-        const { map: overallMap, outOf: classOutOf } = rankMap(overallEntries);
-        overallTotal = subjectRows.reduce((sum, r) => sum + r.total, 0);
-        overallPosition = overallMap.get(child.id) ? ordinal(overallMap.get(child.id)) : "—";
-        outOf = classOutOf;
       }
     }
 
@@ -175,10 +120,7 @@ export default async function ParentPage({ searchParams }) {
       totalDays,
       tuitionBalance: plan ? Number(plan.total_amount) - Number(plan.amount_paid) : null,
       canteenTransportPaid,
-      subjectRows,
-      overallTotal,
-      overallPosition,
-      outOf,
+      card,
     });
   }
 
@@ -236,13 +178,13 @@ export default async function ParentPage({ searchParams }) {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-sm font-medium text-ink">Grades — {selectedTerm}</p>
-                  {child.subjectRows.length > 0 && (
+                  {child.card?.complete && (
                     <p className="text-xs text-stone-400">
-                      Total {child.overallTotal} · Position {child.overallPosition} of {child.outOf}
+                      Total {fmt(child.card.overallTotal)} · {child.card.classLabel}
                     </p>
                   )}
                 </div>
-                {child.subjectRows.length > 0 ? (
+                {child.card?.complete ? (
                   <div className="border border-stone-200 rounded-lg overflow-hidden">
                     <table className="w-full text-xs">
                       <thead className="bg-stone-50 text-stone-500 uppercase">
@@ -254,19 +196,23 @@ export default async function ParentPage({ searchParams }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {child.subjectRows.map((r) => (
+                        {child.card.subjectRows.map((r) => (
                           <tr key={r.subject} className="border-t border-stone-100">
                             <td className="px-3 py-1.5 text-ink">{r.subject}</td>
-                            <td className="px-3 py-1.5 text-center text-stone-600">{r.total || "—"}</td>
+                            <td className="px-3 py-1.5 text-center text-stone-600">{fmt(r.total)}</td>
                             <td className="px-3 py-1.5 text-center font-semibold text-pine">{r.grade}</td>
                             <td className="px-3 py-1.5 text-center text-stone-600">
-                              {r.position} of {r.outOf}
+                              {r.position ? `${r.position} of ${r.outOf}` : "—"}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                ) : child.card ? (
+                  <p className="text-xs text-stone-400">
+                    The school hasn't finished entering all marks for {selectedTerm}. Please check back later.
+                  </p>
                 ) : (
                   <p className="text-xs text-stone-400">No grades recorded for {selectedTerm} yet.</p>
                 )}

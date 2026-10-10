@@ -2,22 +2,16 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { ALL_TYPES, MAX_BY_TYPE } from "@/lib/grading";
 
-const TOTALS = {
-  "Class Exercise/Assignment": 10,
-  "Mid-term": 20,
-  "End-of-term": 70,
+// Form field prefix -> exam type
+const PREFIX_TO_TYPE = {
+  sba1: "SBA 1",
+  sba2: "SBA 2",
+  sba3: "SBA 3",
+  sba4: "SBA 4",
+  exam: "Exam",
 };
-
-function gradeFor(score, total) {
-  const pct = (Number(score) / Number(total)) * 100;
-  if (pct >= 80) return "A";
-  if (pct >= 70) return "B";
-  if (pct >= 60) return "C";
-  if (pct >= 50) return "D";
-  if (pct >= 40) return "E";
-  return "F";
-}
 
 export async function addSubject(formData) {
   const supabase = createClient();
@@ -34,7 +28,9 @@ export async function addSubject(formData) {
   revalidatePath("/grades");
 }
 
-// Saves Class Exercise/Assignment, Mid-term, and End-of-term marks for every student in one go
+// Saves the four SBA allocations (15 each) and the Exam mark (100) for every pupil in one go.
+// A blank box means "no mark yet". Ticking "Did not write" for a pupil saves 0 for every blank box
+// and flags it, so the report card can carry on instead of showing the subject as incomplete.
 export async function saveAllMarks(formData) {
   const supabase = createClient();
   const classroomId = formData.get("classroomId");
@@ -59,13 +55,19 @@ export async function saveAllMarks(formData) {
     }
   }
 
-  // Ensure the three exam rows exist for this subject/term/classroom, and get their ids
+  // Ensure the five exam rows exist for this subject/term/classroom, and get their ids
   const examIds = {};
-  for (const [examType, totalMarks] of Object.entries(TOTALS)) {
+  for (const examType of ALL_TYPES) {
     const { data: examRow, error: examError } = await supabase
       .from("exams")
       .upsert(
-        { classroom_id: classroomId, subject_id: subjectId, term, exam_type: examType, total_marks: totalMarks },
+        {
+          classroom_id: classroomId,
+          subject_id: subjectId,
+          term,
+          exam_type: examType,
+          total_marks: MAX_BY_TYPE[examType],
+        },
         { onConflict: "classroom_id,subject_id,term,exam_type" }
       )
       .select("id")
@@ -75,30 +77,51 @@ export async function saveAllMarks(formData) {
       console.error(`saveAllMarks: failed to upsert exam row for ${examType}:`, examError);
       throw new Error(`Could not save marks (exam setup failed): ${examError.message}`);
     }
-
-    if (examRow) examIds[examType] = examRow.id;
+    examIds[examType] = examRow.id;
   }
 
-  const prefixToType = { ca: "Class Exercise/Assignment", mid: "Mid-term", end: "End-of-term" };
-  const rows = [];
-
-  for (const [key, value] of formData.entries()) {
-    if (value === "") continue;
+  // Work out, per pupil, what to save and what to clear
+  const studentIds = new Set();
+  for (const key of formData.keys()) {
     const [prefix, studentId] = key.split("__");
-    if (!prefixToType[prefix] || !studentId) continue;
+    if ((PREFIX_TO_TYPE[prefix] || prefix === "dnw") && studentId) studentIds.add(studentId);
+  }
 
-    const examType = prefixToType[prefix];
-    const examId = examIds[examType];
-    if (!examId) continue;
+  const rows = [];
+  const toClear = {}; // examType -> [studentId]
 
-    const score = Number(value);
-    rows.push({
-      exam_id: examId,
-      student_id: studentId,
-      score,
-      grade: gradeFor(score, TOTALS[examType]),
-      recorded_by: user?.id,
-    });
+  for (const studentId of studentIds) {
+    const didNotWrite = formData.get(`dnw__${studentId}`) === "on";
+
+    for (const [prefix, examType] of Object.entries(PREFIX_TO_TYPE)) {
+      const raw = formData.get(`${prefix}__${studentId}`);
+      const hasValue = raw !== null && String(raw).trim() !== "";
+
+      if (hasValue) {
+        const score = Number(raw);
+        const max = MAX_BY_TYPE[examType];
+        if (!Number.isFinite(score) || score < 0 || score > max) {
+          throw new Error(`${examType} must be a number from 0 to ${max} (got "${raw}").`);
+        }
+        rows.push({
+          exam_id: examIds[examType],
+          student_id: studentId,
+          score,
+          did_not_write: false,
+          recorded_by: user?.id,
+        });
+      } else if (didNotWrite) {
+        rows.push({
+          exam_id: examIds[examType],
+          student_id: studentId,
+          score: 0,
+          did_not_write: true,
+          recorded_by: user?.id,
+        });
+      } else {
+        (toClear[examType] ||= []).push(studentId);
+      }
+    }
   }
 
   if (rows.length > 0) {
@@ -112,6 +135,21 @@ export async function saveAllMarks(formData) {
     }
   }
 
+  // A box that was emptied (and isn't covered by "Did not write") removes its old mark
+  for (const [examType, ids] of Object.entries(toClear)) {
+    if (ids.length === 0) continue;
+    const { error: clearError } = await supabase
+      .from("results")
+      .delete()
+      .eq("exam_id", examIds[examType])
+      .in("student_id", ids);
+    if (clearError) {
+      console.error("saveAllMarks: failed to clear results:", clearError);
+      throw new Error(`Could not clear emptied marks: ${clearError.message}`);
+    }
+  }
+
   revalidatePath("/grades");
   revalidatePath("/report-card");
+  revalidatePath("/parent/report-card");
 }

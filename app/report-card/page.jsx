@@ -2,26 +2,19 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import Sidebar from "@/components/Sidebar";
 import AutoSubmitSelect from "@/components/AutoSubmitSelect";
+import CommentPicker from "@/components/CommentPicker";
+import {
+  loadGradingConfig,
+  loadTermResults,
+  buildPupilCard,
+  scaleKeyForLevel,
+  fmt,
+  ordinal,
+} from "@/lib/grading";
 import { saveTermInfo, saveRemarks } from "./actions";
 import PrintButton from "./PrintButton";
 
 export const dynamic = "force-dynamic";
-
-function remarkFor(score, total) {
-  const pct = (score / total) * 100;
-  if (pct >= 90) return "EXCELLENT";
-  if (pct >= 80) return "VERY GOOD";
-  if (pct >= 60) return "GOOD";
-  if (pct >= 50) return "AVERAGE";
-  if (pct >= 40) return "BELOW AVERAGE";
-  return "WEAK";
-}
-
-function ordinal(n) {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
-}
 
 function formatFullDate(date) {
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -34,24 +27,6 @@ function academicYear(date) {
   // Ghanaian academic year runs roughly September to August
   const y = date.getFullYear();
   return date.getMonth() >= 8 ? `${y}/${String(y + 1).slice(2)}` : `${y - 1}/${String(y).slice(2)}`;
-}
-
-function rankMap(entries) {
-  const sorted = [...entries].sort((a, b) => b.value - a.value);
-  const map = new Map();
-  let rank = 1;
-  sorted.forEach((entry, i) => {
-    if (i > 0 && entry.value < sorted[i - 1].value) rank = i + 1;
-    map.set(entry.id, rank);
-  });
-  return { map, outOf: sorted.length };
-}
-
-function subjectTotal(t) {
-  const ca = (t?.["Class Exercise/Assignment"]?.score || 0) + (t?.["Mid-term"]?.score || 0);
-  const exam = t?.["End-of-term"]?.score || 0;
-  const hasAny = t?.["Class Exercise/Assignment"] || t?.["Mid-term"] || t?.["End-of-term"];
-  return hasAny ? ca + exam : 0;
 }
 
 export default async function ReportCardPage({ searchParams }) {
@@ -82,133 +57,74 @@ export default async function ReportCardPage({ searchParams }) {
 
   const { data: termInfo } = await supabase.from("term_info").select("*").eq("term", selectedTerm).single();
 
+  const config = await loadGradingConfig(supabase);
+  const { data: commentList } = await supabase
+    .from("report_comments")
+    .select("id, category, comment, tag")
+    .order("sort_order");
+
   let classSummary = [];
   let activeClassroom = null;
+  let classmates = [];
+  let termData = null;
+  let scaleRows = [];
 
   if (selectedClassroomId) {
     activeClassroom = classrooms.find((c) => c.id === selectedClassroomId);
 
-    const { data: classmates } = await supabase
-      .from("students")
-      .select("id, full_name")
-      .eq("classroom_id", selectedClassroomId)
-      .eq("status", "active")
-      .order("full_name");
+    if (activeClassroom) {
+      const { data: classmatesData } = await supabase
+        .from("students")
+        .select("id, full_name")
+        .eq("classroom_id", selectedClassroomId)
+        .eq("status", "active")
+        .order("full_name");
+      classmates = classmatesData || [];
 
-    const { data: exams } = await supabase
-      .from("exams")
-      .select("id, subject_id, exam_type")
-      .eq("classroom_id", selectedClassroomId)
-      .eq("term", selectedTerm);
-    const examIds = (exams || []).map((e) => e.id);
-    const subjectIds = [...new Set((exams || []).map((e) => e.subject_id))];
+      termData = await loadTermResults(supabase, selectedClassroomId, selectedTerm);
+      scaleRows = config.scales[scaleKeyForLevel(activeClassroom.academic_levels.sort_order)] || [];
 
-    let allResults = [];
-    if (examIds.length > 0) {
-      const { data: resultsData } = await supabase
-        .from("results")
-        .select("student_id, score, exams(subject_id, exam_type)")
-        .in("exam_id", examIds);
-      allResults = resultsData || [];
+      const classmateIds = classmates.map((c) => c.id);
+      classSummary = classmates.map((c) => {
+        const card = buildPupilCard({
+          studentId: c.id,
+          classmateIds,
+          totals: termData.totals,
+          subjectIds: termData.subjectIds,
+          subjectNameById: termData.subjectNameById,
+          scaleRows,
+          bands: config.bands,
+        });
+        return {
+          id: c.id,
+          full_name: c.full_name,
+          total: card.overallTotal,
+          classLabel: card.classLabel,
+          missingSubjects: card.incomplete.length,
+          hasSubjects: card.subjectRows.length > 0,
+        };
+      });
     }
-
-    const studentTotals = {};
-    allResults.forEach((r) => {
-      const sid = r.student_id;
-      const subj = r.exams.subject_id;
-      if (!studentTotals[sid]) studentTotals[sid] = {};
-      if (!studentTotals[sid][subj]) studentTotals[sid][subj] = {};
-      studentTotals[sid][subj][r.exams.exam_type] = { score: r.score };
-    });
-
-    const overallEntries = (classmates || []).map((c) => {
-      const value = subjectIds.reduce((sum, subj) => sum + subjectTotal(studentTotals[c.id]?.[subj]), 0);
-      return { id: c.id, value };
-    });
-    const { map: overallMap, outOf } = rankMap(overallEntries);
-
-    classSummary = (classmates || [])
-      .map((c) => ({
-        id: c.id,
-        full_name: c.full_name,
-        total: overallEntries.find((e) => e.id === c.id)?.value || 0,
-        position: overallMap.get(c.id) ? ordinal(overallMap.get(c.id)) : "—",
-        outOf,
-      }))
-      .sort((a, b) => b.total - a.total);
   }
 
   // ---- Detail view for one student ----
   let detail = null;
-  if (selectedStudentId && activeClassroom) {
+  if (selectedStudentId && activeClassroom && termData) {
     const { data: studentInfo } = await supabase
       .from("students")
       .select("id, full_name, photo_url")
       .eq("id", selectedStudentId)
       .single();
 
-    const { data: classmates } = await supabase
-      .from("students")
-      .select("id")
-      .eq("classroom_id", selectedClassroomId)
-      .eq("status", "active");
-    const classSize = (classmates || []).length;
-
-    const { data: exams } = await supabase
-      .from("exams")
-      .select("id, subject_id, exam_type, subjects(name)")
-      .eq("classroom_id", selectedClassroomId)
-      .eq("term", selectedTerm);
-    const examIds = (exams || []).map((e) => e.id);
-    const subjectNameById = new Map((exams || []).map((e) => [e.subject_id, e.subjects?.name || "Unknown"]));
-    const subjectIds = [...subjectNameById.keys()];
-
-    let allResults = [];
-    if (examIds.length > 0) {
-      const { data: resultsData } = await supabase
-        .from("results")
-        .select("student_id, score, exams(subject_id, exam_type)")
-        .in("exam_id", examIds);
-      allResults = resultsData || [];
-    }
-
-    const studentTotals = {};
-    allResults.forEach((r) => {
-      const sid = r.student_id;
-      const subj = r.exams.subject_id;
-      if (!studentTotals[sid]) studentTotals[sid] = {};
-      if (!studentTotals[sid][subj]) studentTotals[sid][subj] = {};
-      studentTotals[sid][subj][r.exams.exam_type] = { score: r.score };
+    const card = buildPupilCard({
+      studentId: selectedStudentId,
+      classmateIds: classmates.map((c) => c.id),
+      totals: termData.totals,
+      subjectIds: termData.subjectIds,
+      subjectNameById: termData.subjectNameById,
+      scaleRows,
+      bands: config.bands,
     });
-
-    const subjectRows = subjectIds.map((subjectId) => {
-      const entries = (classmates || []).map((c) => ({
-        id: c.id,
-        value: subjectTotal(studentTotals[c.id]?.[subjectId]),
-      }));
-      const { map, outOf } = rankMap(entries);
-      const t = studentTotals[selectedStudentId]?.[subjectId];
-      const total = subjectTotal(t);
-      return {
-        subject: subjectNameById.get(subjectId),
-        ca: (t?.["Class Exercise/Assignment"]?.score || 0) + (t?.["Mid-term"]?.score || 0),
-        exam: t?.["End-of-term"]?.score ?? null,
-        total,
-        grade: total > 0 ? remarkFor(total, 100) : "—",
-        position: map.get(selectedStudentId) ? ordinal(map.get(selectedStudentId)) : "—",
-        outOf,
-      };
-    });
-
-    const overallEntries = (classmates || []).map((c) => {
-      const value = subjectIds.reduce((sum, subj) => sum + subjectTotal(studentTotals[c.id]?.[subj]), 0);
-      return { id: c.id, value };
-    });
-    const { map: overallMap } = rankMap(overallEntries);
-    const overallTotal = subjectRows.reduce((sum, r) => sum + r.total, 0);
-    const overallPosition = overallMap.get(selectedStudentId)
-      ? ordinal(overallMap.get(selectedStudentId))
-      : "—";
 
     // Attendance within term dates
     let presentDays = 0;
@@ -247,10 +163,8 @@ export default async function ReportCardPage({ searchParams }) {
 
     detail = {
       studentInfo,
-      classSize,
-      subjectRows,
-      overallTotal,
-      overallPosition,
+      classSize: classmates.length,
+      card,
       presentDays,
       totalDays,
       balance,
@@ -331,7 +245,7 @@ export default async function ReportCardPage({ searchParams }) {
                   <th className="text-left px-3 py-2 font-medium">#</th>
                   <th className="text-left px-3 py-2 font-medium">Name</th>
                   <th className="text-center px-3 py-2 font-medium">Total</th>
-                  <th className="text-center px-3 py-2 font-medium">Position</th>
+                  <th className="text-center px-3 py-2 font-medium">Class</th>
                 </tr>
               </thead>
               <tbody>
@@ -346,9 +260,17 @@ export default async function ReportCardPage({ searchParams }) {
                         {s.full_name}
                       </Link>
                     </td>
-                    <td className="px-3 py-2 text-center text-stone-600">{s.total || "—"}</td>
+                    <td className="px-3 py-2 text-center text-stone-600">{s.hasSubjects ? fmt(s.total) : "—"}</td>
                     <td className="px-3 py-2 text-center text-stone-600">
-                      {s.position} of {s.outOf}
+                      {s.classLabel ? (
+                        s.classLabel
+                      ) : s.hasSubjects ? (
+                        <span className="text-clay text-xs">
+                          Marks missing ({s.missingSubjects} subject{s.missingSubjects === 1 ? "" : "s"})
+                        </span>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -374,6 +296,23 @@ export default async function ReportCardPage({ searchParams }) {
               <PrintButton />
             </div>
 
+            {detail.card.incomplete.length > 0 && (
+              <div className="mb-4 rounded-lg border border-clay/40 bg-clay/5 p-3 text-xs text-ink print:hidden">
+                <p className="font-semibold text-clay mb-1">Marks are still missing for this pupil:</p>
+                <ul className="list-disc ml-4 space-y-0.5">
+                  {detail.card.incomplete.map((r) => (
+                    <li key={r.subject}>
+                      <span className="font-medium">{r.subject}</span> — {r.missing.join(", ")}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1.5 text-stone-500">
+                  Enter them on the Grades page. If the pupil didn't write a paper, tick "Did not write" there to count
+                  it as 0 and continue. The class is shown once every subject is complete.
+                </p>
+              </div>
+            )}
+
             {/* Header */}
             <div className="relative text-center pb-2 mb-3">
               {detail.studentInfo?.photo_url && (
@@ -391,7 +330,7 @@ export default async function ReportCardPage({ searchParams }) {
               <p className="text-sm font-semibold text-ink mt-1.5 uppercase tracking-wide">Pupil's Report Card</p>
             </div>
 
-            {/* Top info: name/class/total, term/roll/position, date/next term */}
+            {/* Top info: name/class/total, term/roll/class achieved, date/next term */}
             <div className="text-[13px] leading-relaxed border-y border-stone-300 py-2 mb-3">
               <p>
                 <span className="text-stone-500">NAME: </span>
@@ -399,15 +338,19 @@ export default async function ReportCardPage({ searchParams }) {
                 <span className="text-stone-500 ml-3">CLASS: </span>
                 <span className="font-medium text-ink">{activeClassroom.academic_levels.name} {activeClassroom.section}</span>
                 <span className="text-stone-500 ml-3">TOTAL SCORE: </span>
-                <span className="font-medium text-ink">{detail.overallTotal}</span>
+                <span className="font-medium text-ink">{fmt(detail.card.overallTotal)}</span>
               </p>
               <p>
                 <span className="text-stone-500">TERM: </span>
                 <span className="font-medium text-ink">{selectedTerm} — {academicYear(now)} Academic Year</span>
                 <span className="text-stone-500 ml-3">NO. ON ROLL: </span>
                 <span className="font-medium text-ink">{detail.classSize}</span>
-                <span className="text-stone-500 ml-3">POSITION IN CLASS: </span>
-                <span className="font-medium text-ink">{detail.overallPosition}</span>
+              </p>
+              <p>
+                <span className="text-stone-500">AVERAGE: </span>
+                <span className="font-medium text-ink">{detail.card.complete ? fmt(detail.card.average) : "—"}</span>
+                <span className="text-stone-500 ml-3">CLASS ACHIEVED: </span>
+                <span className="font-semibold text-pine">{detail.card.classLabel || "— (marks missing)"}</span>
               </p>
               <p>
                 <span className="text-stone-500">DATE: </span>
@@ -422,24 +365,49 @@ export default async function ReportCardPage({ searchParams }) {
               <thead className="bg-pine/10 text-ink uppercase">
                 <tr>
                   <th className="text-left px-2 py-1.5 border border-stone-300">Subject</th>
-                  <th className="text-center px-2 py-1.5 border border-stone-300">30% Score</th>
-                  <th className="text-center px-2 py-1.5 border border-stone-300">70% Score</th>
+                  <th className="text-center px-2 py-1.5 border border-stone-300">SBA (50%)</th>
+                  <th className="text-center px-2 py-1.5 border border-stone-300">Exam (50%)</th>
                   <th className="text-center px-2 py-1.5 border border-stone-300">Total (100%)</th>
+                  <th className="text-center px-2 py-1.5 border border-stone-300">Grade</th>
                   <th className="text-center px-2 py-1.5 border border-stone-300">Position</th>
                   <th className="text-center px-2 py-1.5 border border-stone-300">Remarks</th>
                 </tr>
               </thead>
               <tbody>
-                {detail.subjectRows.map((r) => (
+                {detail.card.subjectRows.map((r) => (
                   <tr key={r.subject}>
                     <td className="px-2 py-1.5 border border-stone-200 text-ink">{r.subject}</td>
-                    <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">{r.ca || "—"}</td>
-                    <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">{r.exam ?? "—"}</td>
-                    <td className="px-2 py-1.5 border border-stone-200 text-center font-medium text-ink">{r.total || "—"}</td>
-                    <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">{r.position}</td>
-                    <td className="px-2 py-1.5 border border-stone-200 text-center font-semibold text-pine">{r.grade}</td>
+                    {r.complete ? (
+                      <>
+                        <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">
+                          {fmt(r.sbaScaled)}
+                          {r.sbaDnw && <span className="block text-[10px] text-clay">Did not write</span>}
+                        </td>
+                        <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">
+                          {r.examDnw ? <span className="text-clay">Did not write</span> : fmt(r.examScaled)}
+                        </td>
+                        <td className="px-2 py-1.5 border border-stone-200 text-center font-medium text-ink">{fmt(r.total)}</td>
+                        <td className="px-2 py-1.5 border border-stone-200 text-center font-semibold text-pine">
+                          {r.grade}
+                          {r.gradeValue ? <span className="text-stone-400 font-normal"> ({r.gradeValue})</span> : null}
+                        </td>
+                        <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">{r.position ? `${r.position} of ${r.outOf}` : "—"}</td>
+                        <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">{r.remark}</td>
+                      </>
+                    ) : (
+                      <td colSpan={6} className="px-2 py-1.5 border border-stone-200 text-center text-clay">
+                        Marks missing: {r.missing.join(", ")}
+                      </td>
+                    )}
                   </tr>
                 ))}
+                {detail.card.subjectRows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-2 py-3 text-center text-stone-400">
+                      No marks have been entered for {selectedTerm} yet.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
 
@@ -509,17 +477,35 @@ export default async function ReportCardPage({ searchParams }) {
               </button>
             </form>
 
-            {/* Editable remarks (kept separate from the printed-style card above) */}
-            <details className="mb-4 print:hidden">
-              <summary className="text-xs text-stone-400 cursor-pointer">Edit attitude / interests / remarks</summary>
-              <form action={saveRemarks} className="space-y-2 mt-2">
+            {/* Editable remarks: pick a ready-made comment or type your own */}
+            <details className="mb-4 print:hidden" open>
+              <summary className="text-xs text-stone-400 cursor-pointer">Attitude / interests / remarks</summary>
+              <form action={saveRemarks} className="space-y-3 mt-2">
                 <input type="hidden" name="studentId" value={selectedStudentId} />
                 <input type="hidden" name="term" value={selectedTerm} />
                 <input type="hidden" name="nextTermBill" value={detail.nextTermBill} />
                 <input name="attitude" defaultValue={detail.remarks?.attitude || ""} placeholder="Attitude / conduct" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
                 <input name="interests" defaultValue={detail.remarks?.interests || ""} placeholder="Interest / hobby" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
-                <input name="teacherRemarks" defaultValue={detail.remarks?.teacher_remarks || ""} placeholder="Class teacher's remark" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
-                <input name="headteacherRemarks" defaultValue={detail.remarks?.headteacher_remarks || ""} placeholder="Head teacher's remark" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+                <div>
+                  <p className="text-[11px] text-stone-400 mb-1">Class teacher's remark</p>
+                  <CommentPicker
+                    key={`t-${selectedStudentId}-${selectedTerm}`}
+                    name="teacherRemarks"
+                    defaultValue={detail.remarks?.teacher_remarks || ""}
+                    placeholder="Class teacher's remark"
+                    comments={commentList || []}
+                  />
+                </div>
+                <div>
+                  <p className="text-[11px] text-stone-400 mb-1">Head teacher's remark</p>
+                  <CommentPicker
+                    key={`h-${selectedStudentId}-${selectedTerm}`}
+                    name="headteacherRemarks"
+                    defaultValue={detail.remarks?.headteacher_remarks || ""}
+                    placeholder="Head teacher's remark"
+                    comments={commentList || []}
+                  />
+                </div>
                 <button type="submit" className="text-xs font-medium bg-stone-700 text-white px-3 py-2 rounded-lg">
                   Save
                 </button>

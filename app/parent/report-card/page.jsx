@@ -1,26 +1,19 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import Sidebar from "@/components/Sidebar";
 import AutoSubmitSelect from "@/components/AutoSubmitSelect";
 import PrintButton from "@/app/report-card/PrintButton";
+import {
+  loadGradingConfig,
+  loadTermResults,
+  buildPupilCard,
+  scaleKeyForLevel,
+  fmt,
+  ordinal,
+} from "@/lib/grading";
 
 export const dynamic = "force-dynamic";
-
-function remarkFor(score, total) {
-  const pct = (score / total) * 100;
-  if (pct >= 90) return "EXCELLENT";
-  if (pct >= 80) return "VERY GOOD";
-  if (pct >= 60) return "GOOD";
-  if (pct >= 50) return "AVERAGE";
-  if (pct >= 40) return "BELOW AVERAGE";
-  return "WEAK";
-}
-
-function ordinal(n) {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
-}
 
 function formatFullDate(date) {
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -32,24 +25,6 @@ function formatFullDate(date) {
 function academicYear(date) {
   const y = date.getFullYear();
   return date.getMonth() >= 8 ? `${y}/${String(y + 1).slice(2)}` : `${y - 1}/${String(y).slice(2)}`;
-}
-
-function rankMap(entries) {
-  const sorted = [...entries].sort((a, b) => b.value - a.value);
-  const map = new Map();
-  let rank = 1;
-  sorted.forEach((entry, i) => {
-    if (i > 0 && entry.value < sorted[i - 1].value) rank = i + 1;
-    map.set(entry.id, rank);
-  });
-  return { map, outOf: sorted.length };
-}
-
-function subjectTotal(t) {
-  const ca = (t?.["Class Exercise/Assignment"]?.score || 0) + (t?.["Mid-term"]?.score || 0);
-  const exam = t?.["End-of-term"]?.score || 0;
-  const hasAny = t?.["Class Exercise/Assignment"] || t?.["Mid-term"] || t?.["End-of-term"];
-  return hasAny ? ca + exam : 0;
 }
 
 export default async function ParentReportCardPage({ searchParams }) {
@@ -96,66 +71,30 @@ export default async function ParentReportCardPage({ searchParams }) {
 
   let detail = null;
   if (activeClassroom) {
-    const { data: classmates } = await supabase
+    // Subject positions need the whole class's marks, which a parent can't read directly.
+    // The link check above has passed, so a server-side client reads the class marks purely
+    // to work out ranks; only this child's own marks and positions are shown.
+    const admin = createAdminClient();
+    const { data: classmates } = await admin
       .from("students")
       .select("id")
       .eq("classroom_id", studentInfo.classroom_id)
       .eq("status", "active");
-    const classSize = (classmates || []).length;
+    const classmateIds = (classmates || []).map((c) => c.id);
 
-    const { data: exams } = await supabase
-      .from("exams")
-      .select("id, subject_id, exam_type, subjects(name)")
-      .eq("classroom_id", studentInfo.classroom_id)
-      .eq("term", selectedTerm);
-    const examIds = (exams || []).map((e) => e.id);
-    const subjectNameById = new Map((exams || []).map((e) => [e.subject_id, e.subjects?.name || "Unknown"]));
-    const subjectIds = [...subjectNameById.keys()];
+    const termData = await loadTermResults(admin, studentInfo.classroom_id, selectedTerm);
+    const config = await loadGradingConfig(supabase);
+    const scaleRows = config.scales[scaleKeyForLevel(activeClassroom.academic_levels.sort_order)] || [];
 
-    let allResults = [];
-    if (examIds.length > 0) {
-      const { data: resultsData } = await supabase
-        .from("results")
-        .select("student_id, score, exams(subject_id, exam_type)")
-        .in("exam_id", examIds);
-      allResults = resultsData || [];
-    }
-
-    const studentTotals = {};
-    allResults.forEach((r) => {
-      const sid = r.student_id;
-      const subj = r.exams.subject_id;
-      if (!studentTotals[sid]) studentTotals[sid] = {};
-      if (!studentTotals[sid][subj]) studentTotals[sid][subj] = {};
-      studentTotals[sid][subj][r.exams.exam_type] = { score: r.score };
+    const card = buildPupilCard({
+      studentId: selectedStudentId,
+      classmateIds,
+      totals: termData.totals,
+      subjectIds: termData.subjectIds,
+      subjectNameById: termData.subjectNameById,
+      scaleRows,
+      bands: config.bands,
     });
-
-    const subjectRows = subjectIds.map((subjectId) => {
-      const entries = (classmates || []).map((c) => ({
-        id: c.id,
-        value: subjectTotal(studentTotals[c.id]?.[subjectId]),
-      }));
-      const { map, outOf } = rankMap(entries);
-      const t = studentTotals[selectedStudentId]?.[subjectId];
-      const total = subjectTotal(t);
-      return {
-        subject: subjectNameById.get(subjectId),
-        ca: (t?.["Class Exercise/Assignment"]?.score || 0) + (t?.["Mid-term"]?.score || 0),
-        exam: t?.["End-of-term"]?.score ?? null,
-        total,
-        grade: total > 0 ? remarkFor(total, 100) : "—",
-        position: map.get(selectedStudentId) ? ordinal(map.get(selectedStudentId)) : "—",
-        outOf,
-      };
-    });
-
-    const overallEntries = (classmates || []).map((c) => {
-      const value = subjectIds.reduce((sum, subj) => sum + subjectTotal(studentTotals[c.id]?.[subj]), 0);
-      return { id: c.id, value };
-    });
-    const { map: overallMap } = rankMap(overallEntries);
-    const overallTotal = subjectRows.reduce((sum, r) => sum + r.total, 0);
-    const overallPosition = overallMap.get(selectedStudentId) ? ordinal(overallMap.get(selectedStudentId)) : "—";
 
     let presentDays = 0;
     let totalDays = 0;
@@ -191,10 +130,8 @@ export default async function ParentReportCardPage({ searchParams }) {
       .maybeSingle();
 
     detail = {
-      classSize,
-      subjectRows,
-      overallTotal,
-      overallPosition,
+      classSize: classmateIds.length,
+      card,
       presentDays,
       totalDays,
       balance,
@@ -209,6 +146,8 @@ export default async function ParentReportCardPage({ searchParams }) {
     { value: "Term 2", label: "Term 2" },
     { value: "Term 3", label: "Term 3" },
   ];
+
+  const ready = detail && activeClassroom && detail.card.subjectRows.length > 0 && detail.card.complete;
 
   return (
     <div className="flex">
@@ -231,7 +170,7 @@ export default async function ParentReportCardPage({ searchParams }) {
           />
         </form>
 
-        {detail && activeClassroom && detail.subjectRows.length > 0 && (
+        {ready && (
           <div className="bg-white rounded-xl border border-stone-200 p-5 print:shadow-none print:border-0 print:p-0">
             {/* Header */}
             <div className="relative text-center pb-2 mb-3">
@@ -258,15 +197,19 @@ export default async function ParentReportCardPage({ searchParams }) {
                 <span className="text-stone-500 ml-3">CLASS: </span>
                 <span className="font-medium text-ink">{activeClassroom.academic_levels.name} {activeClassroom.section}</span>
                 <span className="text-stone-500 ml-3">TOTAL SCORE: </span>
-                <span className="font-medium text-ink">{detail.overallTotal}</span>
+                <span className="font-medium text-ink">{fmt(detail.card.overallTotal)}</span>
               </p>
               <p>
                 <span className="text-stone-500">TERM: </span>
                 <span className="font-medium text-ink">{selectedTerm} — {academicYear(now)} Academic Year</span>
                 <span className="text-stone-500 ml-3">NO. ON ROLL: </span>
                 <span className="font-medium text-ink">{detail.classSize}</span>
-                <span className="text-stone-500 ml-3">POSITION IN CLASS: </span>
-                <span className="font-medium text-ink">{detail.overallPosition}</span>
+              </p>
+              <p>
+                <span className="text-stone-500">AVERAGE: </span>
+                <span className="font-medium text-ink">{fmt(detail.card.average)}</span>
+                <span className="text-stone-500 ml-3">CLASS ACHIEVED: </span>
+                <span className="font-semibold text-pine">{detail.card.classLabel}</span>
               </p>
               <p>
                 <span className="text-stone-500">DATE: </span>
@@ -281,22 +224,32 @@ export default async function ParentReportCardPage({ searchParams }) {
               <thead className="bg-pine/10 text-ink uppercase">
                 <tr>
                   <th className="text-left px-2 py-1.5 border border-stone-300">Subject</th>
-                  <th className="text-center px-2 py-1.5 border border-stone-300">30% Score</th>
-                  <th className="text-center px-2 py-1.5 border border-stone-300">70% Score</th>
+                  <th className="text-center px-2 py-1.5 border border-stone-300">SBA (50%)</th>
+                  <th className="text-center px-2 py-1.5 border border-stone-300">Exam (50%)</th>
                   <th className="text-center px-2 py-1.5 border border-stone-300">Total (100%)</th>
+                  <th className="text-center px-2 py-1.5 border border-stone-300">Grade</th>
                   <th className="text-center px-2 py-1.5 border border-stone-300">Position</th>
                   <th className="text-center px-2 py-1.5 border border-stone-300">Remarks</th>
                 </tr>
               </thead>
               <tbody>
-                {detail.subjectRows.map((r) => (
+                {detail.card.subjectRows.map((r) => (
                   <tr key={r.subject}>
                     <td className="px-2 py-1.5 border border-stone-200 text-ink">{r.subject}</td>
-                    <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">{r.ca || "—"}</td>
-                    <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">{r.exam ?? "—"}</td>
-                    <td className="px-2 py-1.5 border border-stone-200 text-center font-medium text-ink">{r.total || "—"}</td>
-                    <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">{r.position}</td>
-                    <td className="px-2 py-1.5 border border-stone-200 text-center font-semibold text-pine">{r.grade}</td>
+                    <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">
+                      {fmt(r.sbaScaled)}
+                      {r.sbaDnw && <span className="block text-[10px] text-clay">Did not write</span>}
+                    </td>
+                    <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">
+                      {r.examDnw ? <span className="text-clay">Did not write</span> : fmt(r.examScaled)}
+                    </td>
+                    <td className="px-2 py-1.5 border border-stone-200 text-center font-medium text-ink">{fmt(r.total)}</td>
+                    <td className="px-2 py-1.5 border border-stone-200 text-center font-semibold text-pine">
+                      {r.grade}
+                      {r.gradeValue ? <span className="text-stone-400 font-normal"> ({r.gradeValue})</span> : null}
+                    </td>
+                    <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">{r.position ? `${r.position} of ${r.outOf}` : "—"}</td>
+                    <td className="px-2 py-1.5 border border-stone-200 text-center text-stone-600">{r.remark}</td>
                   </tr>
                 ))}
               </tbody>
@@ -357,7 +310,7 @@ export default async function ParentReportCardPage({ searchParams }) {
           </div>
         )}
 
-        {(!detail || !activeClassroom || detail.subjectRows.length === 0) && (
+        {!ready && (
           <div className="bg-white rounded-xl border border-stone-200 p-6 text-center">
             <p className="text-sm font-medium text-ink mb-1">Report card not ready yet</p>
             <p className="text-xs text-stone-400">
