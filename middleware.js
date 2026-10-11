@@ -26,11 +26,20 @@ export async function middleware(request) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isAuthPage = request.nextUrl.pathname.startsWith("/login");
+  const pathname = request.nextUrl.pathname;
+  const isAuthPage = pathname.startsWith("/login");
 
   if (!user && !isAuthPage) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
+
+  // Someone signed in with a temporary password can't use anything until they choose their own.
+  // app_metadata can only be written with the service key, so users can't clear this flag themselves,
+  // and getUser() asks the auth server, so it reflects the change the moment they save.
+  if (user && user.app_metadata?.must_change_password === true && pathname !== "/change-password") {
+    return NextResponse.redirect(new URL("/change-password", request.url));
+  }
+
   if (user && isAuthPage) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }

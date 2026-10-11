@@ -20,6 +20,7 @@ const ALL_NAV = [
   { href: "/absentees", label: "Absentee list", roles: ["admin", "director", "teacher"] },
   { href: "/users", label: "Staff & parents", roles: ADMIN_LIKE },
   { href: "/parent", label: "My children", roles: ["parent"] },
+  { href: "/change-password", label: "Change password", roles: [...ADMIN_LIKE, "accountant", "teacher", "parent"] },
 ];
 export default function Sidebar() {
   const pathname = usePathname();

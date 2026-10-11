@@ -39,7 +39,9 @@ export default function LoginPage() {
     setLoading(false);
 
     let destination = "/dashboard";
-    if (profile?.role === "parent") destination = "/parent";
+    // Temporary password: go straight to choosing a new one (the app blocks everything else until then)
+    if (data.user.app_metadata?.must_change_password === true) destination = "/change-password";
+    else if (profile?.role === "parent") destination = "/parent";
     else if (profile?.role === "accountant") destination = "/fees";
     else if (profile?.role === "teacher") destination = "/attendance";
     else if (ADMIN_LIKE.includes(profile?.role)) destination = "/dashboard";

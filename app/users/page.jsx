@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import Sidebar from "@/components/Sidebar";
 import { linkParentToChild, assignTeacherToClassrooms, unassignTeacherFromClassroom, setClassTeacher, assignTeacherSubjects } from "./actions";
 import CreateUserForm from "./CreateUserForm";
+import ResetPasswordButton from "./ResetPasswordButton";
+import { TOP_ROLES } from "@/lib/passwords";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +67,14 @@ export default async function UsersPage() {
 
   const teachers = (profiles || []).filter((p) => p.role === "teacher");
   const parents = (profiles || []).filter((p) => p.role === "parent");
+
+  // Who can reset whose password: nobody resets their own here (they use "Change password"),
+  // and only an Admin or Director may reset an Admin or Director.
+  const {
+    data: { user: me },
+  } = await supabase.auth.getUser();
+  const myRole = (profiles || []).find((p) => p.id === me?.id)?.role;
+  const canReset = (p) => p.id !== me?.id && (!TOP_ROLES.includes(p.role) || TOP_ROLES.includes(myRole));
 
   return (
     <div className="flex">
@@ -245,14 +255,18 @@ export default async function UsersPage() {
                 <th className="text-left px-4 py-2 font-medium">Name</th>
                 <th className="text-left px-4 py-2 font-medium">Role</th>
                 <th className="text-left px-4 py-2 font-medium">Phone</th>
+                <th className="text-left px-4 py-2 font-medium">Password</th>
               </tr>
             </thead>
             <tbody>
               {(profiles || []).map((p) => (
-                <tr key={p.id} className="border-t border-stone-100">
+                <tr key={p.id} className="border-t border-stone-100 align-top">
                   <td className="px-4 py-2 text-ink">{p.full_name}</td>
                   <td className="px-4 py-2 text-stone-500">{ROLE_LABELS[p.role] || p.role}</td>
                   <td className="px-4 py-2 text-stone-500">{p.phone || "—"}</td>
+                  <td className="px-4 py-2">
+                    {canReset(p) ? <ResetPasswordButton userId={p.id} name={p.full_name} /> : null}
+                  </td>
                 </tr>
               ))}
             </tbody>

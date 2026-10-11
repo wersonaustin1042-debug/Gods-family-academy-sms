@@ -1,31 +1,56 @@
 "use server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { buildUsername, usernameToAuthEmail } from "@/lib/username";
+import { buildUsername, usernameToAuthEmail, authEmailToLoginName } from "@/lib/username";
 import { normalizePhone } from "@/lib/phone";
+import { generateTempPassword, ADMIN_LIKE_ROLES, TOP_ROLES } from "@/lib/passwords";
 import { revalidatePath } from "next/cache";
 
+// Who is calling, and what role they hold (null if not signed in)
+async function getCaller() {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  if (!profile) return null;
+  return { id: user.id, role: profile.role };
+}
+
+// Creates a login with a random temporary password. The admin never chooses the password:
+// it is shown to them once, and the person must set their own at first sign-in.
 export async function createStaffUser(prevState, formData) {
+  const caller = await getCaller();
+  if (!caller || !ADMIN_LIKE_ROLES.includes(caller.role)) {
+    return { error: "Only school administrators can create logins." };
+  }
+
   const supabase = createClient();
   const admin = createAdminClient();
   const fullName = formData.get("fullName")?.trim();
   const rawIdentifier = formData.get("phone")?.trim();
-  const password = formData.get("password");
   const role = formData.get("role");
   const studentId = formData.get("studentId") || null;
-  if (!fullName || !rawIdentifier || !password || !role) {
-    return { error: "Please fill in name, phone number, password, and role." };
+  if (!fullName || !rawIdentifier || !role) {
+    return { error: "Please fill in name, phone number, and role." };
   }
-  if (password.trim().length < 6) {
-    return { error: "Password must be at least 6 characters." };
+  if (TOP_ROLES.includes(role) && !TOP_ROLES.includes(caller.role)) {
+    return { error: "Only an Admin or Director can create an Admin or Director login." };
   }
   const username = buildUsername(rawIdentifier); // "GFA" + digits, e.g. GFA0245117679
+  if (username.length < 6) {
+    return { error: "Enter a valid phone number." };
+  }
   const phone = normalizePhone(username.slice(3)); // real phone, stored for contact/display
   const authEmail = usernameToAuthEmail(username);
+  const tempPassword = generateTempPassword();
   const { data: created, error } = await admin.auth.admin.createUser({
     email: authEmail,
-    password,
+    password: tempPassword,
     email_confirm: true,
+    // app_metadata can only be written with the service key, so users can't clear this flag themselves
+    app_metadata: { must_change_password: true },
   });
   if (error || !created?.user) {
     return { error: error?.message || "Could not create the login." };
@@ -38,7 +63,9 @@ export async function createStaffUser(prevState, formData) {
     role,
   });
   if (profileError) {
-    return { error: `Login created but profile failed: ${profileError.message}` };
+    // Don't leave a login behind that has no profile
+    await admin.auth.admin.deleteUser(newUserId);
+    return { error: `Could not create the login: ${profileError.message}` };
   }
   if (role === "teacher") {
     const classroomIds = formData.getAll("classroomIds").filter(Boolean);
@@ -52,7 +79,47 @@ export async function createStaffUser(prevState, formData) {
     await supabase.from("student_guardians").insert({ student_id: studentId, parent_id: newUserId });
   }
   revalidatePath("/users");
-  return { success: `Created login for ${fullName}.` };
+  return {
+    success: `Created login for ${fullName}.`,
+    loginName: username,
+    tempPassword,
+  };
+}
+
+// Gives someone a new random temporary password (for a forgotten password). Their old password
+// stops working, and they must choose their own again at next sign-in.
+export async function resetUserPassword(prevState, formData) {
+  const caller = await getCaller();
+  if (!caller || !ADMIN_LIKE_ROLES.includes(caller.role)) {
+    return { error: "Only school administrators can reset passwords." };
+  }
+
+  const userId = formData.get("userId");
+  if (!userId) return { error: "No account selected." };
+  if (userId === caller.id) {
+    return { error: 'Use "Change password" in the menu to change your own password.' };
+  }
+
+  const admin = createAdminClient();
+  const { data: target } = await admin.from("profiles").select("full_name, role").eq("id", userId).single();
+  if (!target) return { error: "That account wasn't found." };
+  if (TOP_ROLES.includes(target.role) && !TOP_ROLES.includes(caller.role)) {
+    return { error: "Only an Admin or Director can reset an Admin or Director password." };
+  }
+
+  const tempPassword = generateTempPassword();
+  const { data: updated, error } = await admin.auth.admin.updateUserById(userId, {
+    password: tempPassword,
+    app_metadata: { must_change_password: true },
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/users");
+  return {
+    success: `New temporary password for ${target.full_name}:`,
+    loginName: authEmailToLoginName(updated?.user?.email),
+    tempPassword,
+  };
 }
 
 // Links an existing parent account to another child (for parents with more than one kid at the school)
