@@ -58,8 +58,21 @@ export async function enrollStudent(formData) {
     .single();
   if (error) throw new Error(error.message);
 
-  // Every student starts with a tuition plan so Fees works immediately
-  await supabase.from("tuition_plans").insert({ student_id: student.id });
+  // Every student starts with a tuition plan so Fees works immediately.
+  // (standard_amount is required, so the plan is built from the school's default tuition.)
+  const { data: tuitionSetting } = await supabase
+    .from("fee_settings")
+    .select("value")
+    .eq("key", "default_tuition")
+    .maybeSingle();
+  const standardTuition = Number(tuitionSetting?.value ?? 1200);
+  await supabase.from("tuition_plans").insert({
+    student_id: student.id,
+    standard_amount: standardTuition,
+    discount_amount: 0,
+    total_amount: standardTuition,
+    amount_paid: 0,
+  });
 
   if (photoFile && photoFile.size > 0) {
     const photoUrl = await uploadStudentPhoto(supabase, student.id, photoFile);
