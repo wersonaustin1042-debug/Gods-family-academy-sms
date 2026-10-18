@@ -194,3 +194,53 @@ export async function deleteComment(formData) {
   if (error) throw new Error(error.message);
   refresh();
 }
+
+// ---- Interest / hobby and attitude / conduct options ----
+const OPTION_KINDS = ["interest", "attitude"];
+
+export async function addOption(formData) {
+  const supabase = await requireAdminLike();
+  const kind = String(formData.get("kind") || "");
+  const label = String(formData.get("label") || "").trim();
+  if (!OPTION_KINDS.includes(kind)) throw new Error("Unknown option type.");
+  if (!label) throw new Error("Type the option first.");
+
+  const { data: last } = await supabase
+    .from("report_options")
+    .select("sort_order")
+    .eq("kind", kind)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { error } = await supabase
+    .from("report_options")
+    .insert({ kind, label, sort_order: (last?.sort_order ?? 0) + 1 });
+  if (error) {
+    if (error.code === "23505") throw new Error("That option is already in the list.");
+    throw new Error(error.message);
+  }
+  refresh();
+}
+
+export async function updateOption(formData) {
+  const supabase = await requireAdminLike();
+  const id = Number(formData.get("id"));
+  const label = String(formData.get("label") || "").trim();
+  if (!label) throw new Error("An option can't be empty. Use Delete to remove it.");
+
+  const { error } = await supabase.from("report_options").update({ label }).eq("id", id);
+  if (error) {
+    if (error.code === "23505") throw new Error("That option is already in the list.");
+    throw new Error(error.message);
+  }
+  refresh();
+}
+
+export async function deleteOption(formData) {
+  const supabase = await requireAdminLike();
+  const id = Number(formData.get("id"));
+  const { error } = await supabase.from("report_options").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+  refresh();
+}

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import Sidebar from "@/components/Sidebar";
 import AutoSubmitSelect from "@/components/AutoSubmitSelect";
 import CommentPicker from "@/components/CommentPicker";
+import OptionPicker from "@/components/OptionPicker";
 import {
   loadGradingConfig,
   loadTermResults,
@@ -62,6 +63,12 @@ export default async function ReportCardPage({ searchParams }) {
     .from("report_comments")
     .select("id, category, comment, tag")
     .order("sort_order");
+  const { data: optionList } = await supabase
+    .from("report_options")
+    .select("id, kind, label")
+    .order("sort_order");
+  const interestOptions = (optionList || []).filter((o) => o.kind === "interest");
+  const attitudeOptions = (optionList || []).filter((o) => o.kind === "attitude");
 
   let classSummary = [];
   let activeClassroom = null;
@@ -484,8 +491,26 @@ export default async function ReportCardPage({ searchParams }) {
                 <input type="hidden" name="studentId" value={selectedStudentId} />
                 <input type="hidden" name="term" value={selectedTerm} />
                 <input type="hidden" name="nextTermBill" value={detail.nextTermBill} />
-                <input name="attitude" defaultValue={detail.remarks?.attitude || ""} placeholder="Attitude / conduct" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
-                <input name="interests" defaultValue={detail.remarks?.interests || ""} placeholder="Interest / hobby" className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" />
+                <div>
+                  <p className="text-[11px] text-stone-400 mb-1">Attitude / conduct</p>
+                  <OptionPicker
+                    key={`a-${selectedStudentId}-${selectedTerm}`}
+                    name="attitude"
+                    defaultValue={detail.remarks?.attitude || ""}
+                    placeholder="Attitude / conduct"
+                    options={attitudeOptions}
+                  />
+                </div>
+                <div>
+                  <p className="text-[11px] text-stone-400 mb-1">Interest / hobby</p>
+                  <OptionPicker
+                    key={`i-${selectedStudentId}-${selectedTerm}`}
+                    name="interests"
+                    defaultValue={detail.remarks?.interests || ""}
+                    placeholder="Interest / hobby"
+                    options={interestOptions}
+                  />
+                </div>
                 <div>
                   <p className="text-[11px] text-stone-400 mb-1">Class teacher's remark</p>
                   <CommentPicker

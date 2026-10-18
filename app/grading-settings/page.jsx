@@ -1,7 +1,16 @@
 import { createClient } from "@/lib/supabase/server";
 import Sidebar from "@/components/Sidebar";
 import { ADMIN_LIKE_ROLES } from "@/lib/grading";
-import { saveClassBands, saveGradeScale, addComment, updateComment, deleteComment } from "./actions";
+import {
+  saveClassBands,
+  saveGradeScale,
+  addComment,
+  updateComment,
+  deleteComment,
+  addOption,
+  updateOption,
+  deleteOption,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +77,37 @@ function ScaleForm({ scale, title, subtitle, rows }) {
   );
 }
 
+function OptionList({ kind, title, subtitle, items }) {
+  return (
+    <div className="bg-white rounded-xl border border-stone-200 p-4 mb-4">
+      <p className="text-sm font-medium text-ink">{title}</p>
+      <p className="text-xs text-stone-400 mb-3">{subtitle}</p>
+      <div className="space-y-2">
+        {items.map((o) => (
+          <form key={o.id} className="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="id" value={o.id} />
+            <input name="label" defaultValue={o.label} className={`${inputCls} flex-1 min-w-[180px]`} />
+            <button formAction={updateOption} className="bg-pine text-paper text-xs font-medium px-3 py-1.5 rounded-lg">
+              Save
+            </button>
+            <button formAction={deleteOption} className="text-xs font-medium text-clay border border-clay/40 px-3 py-1.5 rounded-lg">
+              Delete
+            </button>
+          </form>
+        ))}
+        {items.length === 0 && <p className="text-xs text-stone-400">No options yet.</p>}
+      </div>
+      <form action={addOption} className="flex flex-wrap items-center gap-2 border-t border-stone-100 mt-3 pt-3">
+        <input type="hidden" name="kind" value={kind} />
+        <input name="label" required placeholder="Add a new option" className={`${inputCls} flex-1 min-w-[180px]`} />
+        <button type="submit" className="bg-stone-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg">
+          Add
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export default async function GradingSettingsPage() {
   const supabase = createClient();
   const {
@@ -86,11 +126,14 @@ export default async function GradingSettingsPage() {
     );
   }
 
-  const [{ data: scaleRows }, { data: bands }, { data: comments }] = await Promise.all([
+  const [{ data: scaleRows }, { data: bands }, { data: comments }, { data: optionRows }] = await Promise.all([
     supabase.from("grade_scales").select("*").order("min_mark", { ascending: false }),
     supabase.from("class_bands").select("*").order("min_average", { ascending: false }),
     supabase.from("report_comments").select("*").order("sort_order"),
+    supabase.from("report_options").select("*").order("sort_order"),
   ]);
+  const interestOptions = (optionRows || []).filter((o) => o.kind === "interest");
+  const attitudeOptions = (optionRows || []).filter((o) => o.kind === "attitude");
 
   const primary = (scaleRows || []).filter((r) => r.scale === "primary");
   const jhs = (scaleRows || []).filter((r) => r.scale === "jhs");
@@ -152,6 +195,26 @@ export default async function GradingSettingsPage() {
             title="JHS (BECE) scale"
             subtitle="Used for JHS 1 to JHS 3. Keep one row starting at 0."
             rows={jhs}
+          />
+        </section>
+
+        {/* Interest / hobby and attitude / conduct options */}
+        <section className="mb-8">
+          <h2 className="font-display text-lg font-semibold text-ink mb-1">Interest / hobby &amp; attitude / conduct</h2>
+          <p className="text-xs text-stone-400 mb-3">
+            These fill the two drop-downs on the report card. Teachers can pick more than one, or type their own.
+          </p>
+          <OptionList
+            kind="attitude"
+            title="Attitude / conduct"
+            subtitle="Shown next to ATTITUDE on the report card."
+            items={attitudeOptions}
+          />
+          <OptionList
+            kind="interest"
+            title="Interest / hobby"
+            subtitle="Shown next to INTEREST / HOBBY on the report card."
+            items={interestOptions}
           />
         </section>
 
